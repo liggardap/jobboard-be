@@ -1,5 +1,6 @@
 services:
   nginx:
+    container_name: jobboard-nginx
     image: nginx:alpine
     ports:
       - "8000:80"
@@ -12,6 +13,7 @@ services:
       - jobboard
 
   app:
+    container_name: jobboard-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -26,6 +28,7 @@ services:
       - jobboard
 
   mysql:
+    container_name: jobboard-mysql
     image: mysql:8.0
     ports:
       - "3306:3306"
@@ -45,6 +48,7 @@ services:
       - jobboard
 
   redis:
+    container_name: jobboard-redis
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -60,6 +64,7 @@ services:
       - jobboard
 
   elasticsearch:
+    container_name: jobboard-elasticsearch
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
     ports:
       - "9200:9200"
@@ -78,6 +83,7 @@ services:
       - jobboard
 
   mailpit:
+    container_name: jobboard-mailpit
     image: axllent/mailpit:latest
     ports:
       - "8025:8025"
@@ -86,6 +92,7 @@ services:
       - jobboard
 
   indexer:
+    container_name: jobboard-indexer
     build:
       context: ./indexer
       dockerfile: Dockerfile
