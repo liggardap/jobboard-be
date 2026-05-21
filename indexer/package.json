@@ -1,0 +1,13 @@
+{
+  "name": "jobboard-indexer",
+  "version": "1.0.0",
+  "description": "Node.js Redis subscriber that syncs jobs to Elasticsearch",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.0.0",
+    "ioredis": "^5.0.0"
+  }
+}
