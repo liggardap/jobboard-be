@@ -1,48 +1,67 @@
-const Redis = require('ioredis');
-const { Client } = require('@elastic/elasticsearch');
+import { createClient } from 'redis';
+import { createEsClient, ensureIndex } from './elasticsearch.js';
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'redis',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-});
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const ES_URL = process.env.ES_URL || 'http://localhost:9200';
+const INDEX_NAME = 'jobs';
 
-const es = new Client({
-  node: process.env.ELASTICSEARCH_HOST || 'http://elasticsearch:9200',
-});
+const redis = createClient({ url: REDIS_URL });
+const es = createEsClient(ES_URL);
 
-async function handleIndex(payload) {
-  const job = JSON.parse(payload);
-  await es.index({
-    index: 'jobs',
-    id: String(job.id),
-    document: job,
-  });
-  console.log(`Indexed job ${job.id}`);
+redis.on('error', (err) => console.error('Redis client error:', err));
+
+async function handleIndex(message) {
+  const job = JSON.parse(message);
+  await es.index({ index: INDEX_NAME, id: String(job.id), document: job });
+  console.log(`Indexed job ${job.id}: ${job.title}`);
 }
 
-async function handleDelete(payload) {
-  const { id } = JSON.parse(payload);
-  await es.delete({ index: 'jobs', id: String(id) });
-  console.log(`Deleted job ${id}`);
+async function handleDelete(message) {
+  const { id } = JSON.parse(message);
+  await es.delete({ index: INDEX_NAME, id: String(id) });
+  console.log(`Deleted job ${id} from index`);
 }
 
 async function start() {
+  await redis.connect();
+  await es.ping();
+  await ensureIndex(es, INDEX_NAME);
+
+  console.log('Indexer ready — subscribed to jobs:index and jobs:delete');
+
   const subscriber = redis.duplicate();
+  await subscriber.connect();
 
-  await subscriber.subscribe('jobs:index', 'jobs:delete');
-  console.log('Subscribed to jobs:index and jobs:delete');
-
-  subscriber.on('message', async (channel, message) => {
+  await subscriber.subscribe('jobs:index', async (message) => {
     try {
-      if (channel === 'jobs:index') {
-        await handleIndex(message);
-      } else if (channel === 'jobs:delete') {
-        await handleDelete(message);
-      }
+      await handleIndex(message);
     } catch (err) {
-      console.error(`Error processing message on ${channel}:`, err);
+      console.error('Failed to index job:', err.message);
     }
   });
+
+  await subscriber.subscribe('jobs:delete', async (message) => {
+    try {
+      await handleDelete(message);
+    } catch (err) {
+      console.error('Failed to delete job:', err.message);
+    }
+  });
+
+  const shutdown = async (signal) => {
+    console.log(`${signal} received — shutting down gracefully`);
+    try {
+      await subscriber.unsubscribe();
+      await subscriber.quit();
+      await redis.quit();
+    } catch (err) {
+      console.error('Error during shutdown:', err.message);
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 start().catch((err) => {
