@@ -1,5 +1,9 @@
 <?php
 
+use App\Actions\Application\ApplyToJob;
+use App\Actions\Application\ListJobApplications;
+use App\Actions\Application\ListMyApplications;
+use App\Actions\Application\WithdrawApplication;
 use App\Actions\Auth\ForgotPassword;
 use App\Actions\Auth\Login;
 use App\Actions\Auth\Logout;
@@ -34,6 +38,13 @@ Route::prefix('v1')->group(function () {
         Route::get('/{id}', GetCompany::class)->whereNumber('id');
         Route::post('/', CreateCompany::class)->middleware('role:company');
         Route::patch('/{id}', UpdateCompany::class)->whereNumber('id')->middleware('role:company,admin');
+    });
+
+    Route::middleware('auth:api')->group(function () {
+        Route::post('/jobs/{id}/apply', ApplyToJob::class)->whereNumber('id')->middleware('role:candidate');
+        Route::get('/jobs/{id}/applications', ListJobApplications::class)->whereNumber('id')->middleware('role:company');
+        Route::get('/me/applications', ListMyApplications::class);
+        Route::delete('/applications/{id}', WithdrawApplication::class)->whereNumber('id');
     });
 
     Route::prefix('auth')->group(function () {
