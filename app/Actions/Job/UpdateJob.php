@@ -11,6 +11,41 @@ use App\Http\Resources\JobResource;
 use App\Interfaces\JobServiceInterface;
 use Illuminate\Http\JsonResponse;
 
+/**
+ * @OA\Patch(
+ *     path="/jobs/{id}",
+ *     summary="Update a job posting",
+ *     tags={"Jobs"},
+ *     security={{"bearerAuth":{}}},
+ *
+ *     @OA\Parameter(name="id", in="path", required=true, @OA\Schema(type="integer")),
+ *
+ *     @OA\RequestBody(
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="title", type="string"),
+ *             @OA\Property(property="description", type="string"),
+ *             @OA\Property(property="status", type="string", enum={"draft","active","closed"})
+ *         )
+ *     ),
+ *
+ *     @OA\Response(
+ *         response=200,
+ *         description="Updated",
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="success", type="boolean", example=true),
+ *             @OA\Property(property="data", ref="#/components/schemas/Job")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(response=401, description="Unauthenticated", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=403, description="Forbidden", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=404, description="Not found", @OA\JsonContent(ref="#/components/schemas/ProblemDetails"))
+ * )
+ */
 class UpdateJob extends BaseAction
 {
     public function __construct(

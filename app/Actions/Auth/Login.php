@@ -10,6 +10,43 @@ use App\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
 use Tymon\JWTAuth\JWTGuard;
 
+/**
+ * @OA\Post(
+ *     path="/auth/login",
+ *     summary="Log in and receive a JWT",
+ *     tags={"Auth"},
+ *
+ *     @OA\RequestBody(
+ *         required=true,
+ *
+ *         @OA\JsonContent(
+ *             required={"email","password"},
+ *
+ *             @OA\Property(property="email", type="string", format="email"),
+ *             @OA\Property(property="password", type="string")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(
+ *         response=200,
+ *         description="Authenticated",
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="success", type="boolean", example=true),
+ *             @OA\Property(property="data", type="object",
+ *                 @OA\Property(property="user", ref="#/components/schemas/User"),
+ *                 @OA\Property(property="token", type="string"),
+ *                 @OA\Property(property="token_type", type="string", example="bearer"),
+ *                 @OA\Property(property="expires_in", type="integer")
+ *             )
+ *         )
+ *     ),
+ *
+ *     @OA\Response(response=401, description="Invalid credentials", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=422, description="Validation error", @OA\JsonContent(ref="#/components/schemas/ProblemDetails"))
+ * )
+ */
 class Login extends BaseAction
 {
     public function handle(LoginRequest $request): JsonResponse

@@ -9,6 +9,44 @@ use App\Http\Resources\CompanyResource;
 use App\Interfaces\CompanyServiceInterface;
 use Illuminate\Http\JsonResponse;
 
+/**
+ * @OA\Patch(
+ *     path="/companies/{id}",
+ *     summary="Update a company profile",
+ *     tags={"Companies"},
+ *     security={{"bearerAuth":{}}},
+ *
+ *     @OA\Parameter(name="id", in="path", required=true, @OA\Schema(type="integer")),
+ *
+ *     @OA\RequestBody(
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="name", type="string"),
+ *             @OA\Property(property="description", type="string"),
+ *             @OA\Property(property="industry", type="string"),
+ *             @OA\Property(property="city", type="string"),
+ *             @OA\Property(property="country", type="string"),
+ *             @OA\Property(property="website", type="string")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(
+ *         response=200,
+ *         description="Updated",
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="success", type="boolean", example=true),
+ *             @OA\Property(property="data", ref="#/components/schemas/Company")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(response=401, description="Unauthenticated", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=403, description="Forbidden", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=404, description="Not found", @OA\JsonContent(ref="#/components/schemas/ProblemDetails"))
+ * )
+ */
 class UpdateCompany extends BaseAction
 {
     public function __construct(
