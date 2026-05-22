@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use App\Models\Job;
 use App\Models\User;
@@ -18,28 +19,28 @@ class ApplicationFactory extends Factory
             'job_id' => Job::factory()->active(),
             'user_id' => User::factory(),
             'cover_letter' => fake()->paragraphs(2, true),
-            'status' => 'pending',
+            'status' => ApplicationStatus::Pending,
         ];
     }
 
     public function reviewed(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'reviewed',
+            'status' => ApplicationStatus::Reviewed,
         ]);
     }
 
     public function shortlisted(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'shortlisted',
+            'status' => ApplicationStatus::Shortlisted,
         ]);
     }
 
     public function rejected(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'rejected',
+            'status' => ApplicationStatus::Rejected,
         ]);
     }
 }
