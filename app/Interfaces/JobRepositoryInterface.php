@@ -16,4 +16,6 @@ interface JobRepositoryInterface
     public function update(Job $job, array $data): Job;
 
     public function delete(Job $job): void;
+
+    public function chunkActive(int $size, callable $callback): void;
 }
