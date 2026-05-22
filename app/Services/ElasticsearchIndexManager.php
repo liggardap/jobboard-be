@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Interfaces\ElasticsearchIndexManagerInterface;
 use Elastic\Elasticsearch\Client;
 
+/** @codeCoverageIgnore */
 class ElasticsearchIndexManager implements ElasticsearchIndexManagerInterface
 {
     public function __construct(

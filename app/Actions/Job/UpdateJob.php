@@ -24,9 +24,9 @@ use Illuminate\Http\JsonResponse;
  *
  *         @OA\JsonContent(
  *
- *             @OA\Property(property="title", type="string"),
- *             @OA\Property(property="description", type="string"),
- *             @OA\Property(property="status", type="string", enum={"draft","active","closed"})
+ *             @OA\Property(property="title", type="string", example="Senior Backend Engineer"),
+ *             @OA\Property(property="description", type="string", example="Updated job description..."),
+ *             @OA\Property(property="status", type="string", enum={"draft","active","closed"}, example="active")
  *         )
  *     ),
  *

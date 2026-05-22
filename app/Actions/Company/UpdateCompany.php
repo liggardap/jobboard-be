@@ -22,12 +22,12 @@ use Illuminate\Http\JsonResponse;
  *
  *         @OA\JsonContent(
  *
- *             @OA\Property(property="name", type="string"),
- *             @OA\Property(property="description", type="string"),
- *             @OA\Property(property="industry", type="string"),
- *             @OA\Property(property="city", type="string"),
- *             @OA\Property(property="country", type="string"),
- *             @OA\Property(property="website", type="string")
+ *             @OA\Property(property="name", type="string", example="Acme Corp"),
+ *             @OA\Property(property="description", type="string", example="A leading technology company"),
+ *             @OA\Property(property="industry", type="string", example="Technology"),
+ *             @OA\Property(property="city", type="string", example="Jakarta"),
+ *             @OA\Property(property="country", type="string", example="ID"),
+ *             @OA\Property(property="website", type="string", example="https://acme.com")
  *         )
  *     ),
  *

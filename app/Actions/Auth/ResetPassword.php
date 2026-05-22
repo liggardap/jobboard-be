@@ -23,10 +23,10 @@ use Illuminate\Support\Facades\Password;
  *         @OA\JsonContent(
  *             required={"token","email","password","password_confirmation"},
  *
- *             @OA\Property(property="token", type="string"),
- *             @OA\Property(property="email", type="string", format="email"),
- *             @OA\Property(property="password", type="string", minLength=8),
- *             @OA\Property(property="password_confirmation", type="string")
+ *             @OA\Property(property="token", type="string", example="eyJhbGciOiJIUzI1NiJ9..."),
+ *             @OA\Property(property="email", type="string", format="email", example="alice@example.com"),
+ *             @OA\Property(property="password", type="string", minLength=8, example="newpassword123"),
+ *             @OA\Property(property="password_confirmation", type="string", example="newpassword123")
  *         )
  *     ),
  *

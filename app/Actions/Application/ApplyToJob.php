@@ -23,7 +23,7 @@ use Illuminate\Http\JsonResponse;
  *
  *         @OA\JsonContent(
  *
- *             @OA\Property(property="cover_letter", type="string", nullable=true)
+ *             @OA\Property(property="cover_letter", type="string", nullable=true, example="I am excited to apply for this role...")
  *         )
  *     ),
  *

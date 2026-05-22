@@ -94,6 +94,24 @@ class ReindexElasticsearchTest extends TestCase
         $this->artisan('es:reindex', ['--fresh' => true])->assertSuccessful();
     }
 
+    public function test_command_with_fresh_flag_on_empty_cluster_skips_delete(): void
+    {
+        Job::factory()->active()->create();
+
+        $manager = Mockery::mock(ElasticsearchIndexManagerInterface::class);
+        $manager->shouldReceive('createIndex')->once();
+        $manager->shouldReceive('getAliasIndexes')->andThrow(new \Exception('no alias'));
+        $manager->shouldReceive('updateAliases')->once();
+        $manager->shouldReceive('getVersionedIndexes')
+            ->andThrow(new \Exception('no versioned indexes'));
+        $manager->shouldReceive('deleteIndex')->never();
+        $manager->shouldReceive('bulk')->once();
+
+        $this->instance(ElasticsearchIndexManagerInterface::class, $manager);
+
+        $this->artisan('es:reindex', ['--fresh' => true])->assertSuccessful();
+    }
+
     public function test_command_handles_first_run_with_no_jobs(): void
     {
         $manager = Mockery::mock(ElasticsearchIndexManagerInterface::class);

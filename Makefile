@@ -1,10 +1,14 @@
-.PHONY: up down shell artisan migrate seed fresh test test-coverage coverage pint phpstan logs cache-clear indexer es-reindex swagger
+.PHONY: up down remove shell artisan migrate seed fresh test test-coverage coverage pint phpstan logs cache-clear indexer es-reindex swagger
 
 up:
 	podman-compose up -d
 
 down:
 	podman-compose down
+
+remove:
+	podman-compose down
+	podman image prune -f
 
 shell:
 	podman-compose exec app bash

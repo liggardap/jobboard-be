@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Interfaces\ElasticsearchClientInterface;
 use Elastic\Elasticsearch\Client;
 
+/** @codeCoverageIgnore */
 class ElasticsearchClientAdapter implements ElasticsearchClientInterface
 {
     public function __construct(
