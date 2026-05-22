@@ -9,13 +9,13 @@ interface ApplicationRepositoryInterface
 {
     public function findById(int $id): ?Application;
 
-    public function findByJobId(int $jobId): LengthAwarePaginator;
+    public function findByUserAndJob(int $userId, int $jobId): ?Application;
 
-    public function findByUserId(int $userId): LengthAwarePaginator;
+    public function findByUserId(int $userId, int $perPage = 15): LengthAwarePaginator;
 
-    public function existsByJobAndUser(int $jobId, int $userId): bool;
+    public function findByJobId(int $jobId, int $perPage = 15): LengthAwarePaginator;
 
     public function create(array $data): Application;
 
-    public function delete(int $id): void;
+    public function delete(Application $application): void;
 }

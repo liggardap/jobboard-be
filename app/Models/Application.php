@@ -3,8 +3,20 @@
 namespace App\Models;
 
 use App\Enums\ApplicationStatus;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property int $job_id
+ * @property int $user_id
+ * @property string|null $cover_letter
+ * @property ApplicationStatus $status
+ * @property Carbon $applied_at
+ * @property Carbon|null $updated_at
+ * @property-read Job $job
+ * @property-read User $user
+ */
 class Application extends BaseModel
 {
     public $timestamps = false;

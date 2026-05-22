@@ -11,3 +11,5 @@ parameters:
           path: app/Repositories/CompanyRepository.php
         - identifier: method.notFound
           path: app/Repositories/JobRepository.php
+        - identifier: method.notFound
+          path: app/Repositories/ApplicationRepository.php

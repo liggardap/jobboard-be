@@ -2,15 +2,19 @@
 
 namespace App\Providers;
 
+use App\Interfaces\ApplicationRepositoryInterface;
+use App\Interfaces\ApplicationServiceInterface;
 use App\Interfaces\CompanyRepositoryInterface;
 use App\Interfaces\CompanyServiceInterface;
 use App\Interfaces\JobRepositoryInterface;
 use App\Interfaces\JobServiceInterface;
 use App\Interfaces\SearchRepositoryInterface;
 use App\Interfaces\SearchServiceInterface;
+use App\Repositories\ApplicationRepository;
 use App\Repositories\CompanyRepository;
 use App\Repositories\ElasticsearchRepository;
 use App\Repositories\JobRepository;
+use App\Services\ApplicationService;
 use App\Services\CompanyService;
 use App\Services\JobService;
 use App\Services\SearchService;
@@ -20,6 +24,8 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->bind(ApplicationRepositoryInterface::class, ApplicationRepository::class);
+        $this->app->bind(ApplicationServiceInterface::class, ApplicationService::class);
         $this->app->bind(SearchRepositoryInterface::class, ElasticsearchRepository::class);
         $this->app->bind(SearchServiceInterface::class, SearchService::class);
         $this->app->bind(CompanyRepositoryInterface::class, CompanyRepository::class);
