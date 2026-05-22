@@ -5,3 +5,7 @@ parameters:
     level: 5
     paths:
         - app
+    ignoreErrors:
+        # Larastan types QueryBuilder::for() as Eloquent Builder, missing Spatie QueryBuilder methods
+        - identifier: method.notFound
+          path: app/Repositories/CompanyRepository.php
