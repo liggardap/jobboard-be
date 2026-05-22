@@ -54,6 +54,50 @@ class CompanyServiceTest extends TestCase
         $service->update($company, $other, ['name' => 'Hijacked']);
     }
 
+    public function test_create_creates_company_for_user_without_one(): void
+    {
+        $user = User::factory()->create(['role' => UserRole::Company]);
+
+        $repo = Mockery::mock(CompanyRepositoryInterface::class);
+        $repo->shouldReceive('create')
+            ->once()
+            ->withArgs(fn ($data) => $data['name'] === 'Acme Corp' && $data['user_id'] === $user->id)
+            ->andReturn(Company::factory()->make(['user_id' => $user->id]));
+
+        $service = new CompanyService($repo);
+        $result = $service->create($user, ['name' => 'Acme Corp', 'description' => 'test', 'industry' => 'Tech']);
+
+        $this->assertInstanceOf(Company::class, $result);
+    }
+
+    public function test_paginate_delegates_to_repository(): void
+    {
+        $paginator = Company::factory()->count(2)->create()
+            ->toQuery()->paginate(15);
+
+        $repo = Mockery::mock(CompanyRepositoryInterface::class);
+        $repo->shouldReceive('paginate')->with(15)->andReturn($paginator);
+
+        $service = new CompanyService($repo);
+        $result = $service->paginate(15);
+
+        $this->assertEquals($paginator, $result);
+    }
+
+    public function test_get_by_id_returns_company_when_found(): void
+    {
+        $company = Company::factory()->create();
+
+        $repo = Mockery::mock(CompanyRepositoryInterface::class);
+        $repo->shouldReceive('findById')->with($company->id)->andReturn($company);
+
+        $service = new CompanyService($repo);
+        $result = $service->getById($company->id);
+
+        $this->assertInstanceOf(Company::class, $result);
+        $this->assertEquals($company->id, $result->id);
+    }
+
     public function test_update_allows_admin_to_update_any_company(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Company]);

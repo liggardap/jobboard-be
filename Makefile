@@ -1,4 +1,4 @@
-.PHONY: up down shell artisan migrate seed fresh test pint phpstan logs cache-clear indexer es-reindex
+.PHONY: up down shell artisan migrate seed fresh test test-coverage pint phpstan logs cache-clear indexer es-reindex
 
 up:
 	podman-compose up -d
@@ -24,6 +24,9 @@ fresh:
 test:
 	podman-compose exec app php artisan migrate --env=testing --database=mysql_test 2>/dev/null || true
 	podman-compose exec app php artisan test
+
+test-coverage:
+	podman-compose exec app php artisan test --coverage --min=100
 
 pint:
 	podman-compose exec app ./vendor/bin/pint

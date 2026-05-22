@@ -2,13 +2,13 @@
 
 namespace App\Repositories;
 
+use App\Interfaces\ElasticsearchClientInterface;
 use App\Interfaces\SearchRepositoryInterface;
-use Elastic\Elasticsearch\Client;
 
 class ElasticsearchRepository implements SearchRepositoryInterface
 {
     public function __construct(
-        private readonly Client $client,
+        private readonly ElasticsearchClientInterface $client,
     ) {}
 
     public function search(array $query, int $from = 0, int $size = 15): array

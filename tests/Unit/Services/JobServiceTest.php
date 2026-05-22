@@ -106,6 +106,21 @@ class JobServiceTest extends TestCase
         $service->delete($job);
     }
 
+    public function test_list_by_company_delegates_to_repository(): void
+    {
+        $company = Company::factory()->create();
+        $paginator = Job::factory()->count(2)->create(['company_id' => $company->id])
+            ->toQuery()->paginate(15);
+
+        $repo = Mockery::mock(JobRepositoryInterface::class);
+        $repo->shouldReceive('findByCompanyId')->with($company->id, 15)->andReturn($paginator);
+
+        $service = new JobService($repo);
+        $result = $service->listByCompany($company->id, 15);
+
+        $this->assertEquals($paginator, $result);
+    }
+
     public function test_delete_handles_redis_failure_gracefully(): void
     {
         Redis::shouldReceive('publish')->andThrow(new \Exception('Redis down'));
