@@ -9,11 +9,11 @@ interface JobRepositoryInterface
 {
     public function findById(int $id): ?Job;
 
-    public function findByCompanyId(int $companyId): LengthAwarePaginator;
+    public function findByCompanyId(int $companyId, int $perPage = 15): LengthAwarePaginator;
 
     public function create(array $data): Job;
 
-    public function update(int $id, array $data): Job;
+    public function update(Job $job, array $data): Job;
 
-    public function delete(int $id): void;
+    public function delete(Job $job): void;
 }

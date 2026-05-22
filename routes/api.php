@@ -10,11 +10,24 @@ use App\Actions\Company\CreateCompany;
 use App\Actions\Company\GetCompany;
 use App\Actions\Company\ListCompanies;
 use App\Actions\Company\UpdateCompany;
+use App\Actions\Job\CreateJob;
+use App\Actions\Job\DeleteJob;
+use App\Actions\Job\GetJob;
+use App\Actions\Job\ListJobs;
+use App\Actions\Job\UpdateJob;
 use App\Actions\Search\SearchJobs;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     Route::get('/jobs', SearchJobs::class);
+
+    Route::get('/jobs/{id}', GetJob::class)->whereNumber('id');
+    Route::middleware(['auth:api', 'role:company,admin'])->group(function () {
+        Route::post('/jobs', CreateJob::class)->middleware('role:company');
+        Route::patch('/jobs/{id}', UpdateJob::class)->whereNumber('id');
+        Route::delete('/jobs/{id}', DeleteJob::class)->whereNumber('id');
+    });
+    Route::get('/companies/{id}/jobs', ListJobs::class)->whereNumber('id')->middleware('auth:api');
 
     Route::prefix('companies')->middleware('auth:api')->group(function () {
         Route::get('/', ListCompanies::class);
