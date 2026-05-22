@@ -1,10 +1,14 @@
-.PHONY: up down shell artisan migrate seed fresh test test-coverage pint phpstan logs cache-clear indexer es-reindex
+.PHONY: up down remove shell artisan migrate seed fresh test test-coverage coverage pint phpstan logs cache-clear indexer es-reindex swagger
 
 up:
 	podman-compose up -d
 
 down:
 	podman-compose down
+
+remove:
+	podman-compose down
+	podman image prune -f
 
 shell:
 	podman-compose exec app bash
@@ -25,7 +29,9 @@ test:
 	podman-compose exec app php artisan migrate --env=testing --database=mysql_test 2>/dev/null || true
 	podman-compose exec app php artisan test
 
-test-coverage:
+test-coverage: coverage
+
+coverage:
 	podman-compose exec app php artisan test --coverage --min=100
 
 pint:
@@ -48,3 +54,6 @@ indexer:
 
 es-reindex:
 	podman-compose exec app php artisan es:reindex
+
+swagger:
+	podman-compose exec app php artisan l5-swagger:generate

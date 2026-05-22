@@ -9,6 +9,28 @@ use App\Interfaces\JobServiceInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * @OA\Get(
+ *     path="/jobs/{id}",
+ *     summary="Get a single job",
+ *     tags={"Jobs"},
+ *
+ *     @OA\Parameter(name="id", in="path", required=true, @OA\Schema(type="integer")),
+ *
+ *     @OA\Response(
+ *         response=200,
+ *         description="Job",
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="success", type="boolean", example=true),
+ *             @OA\Property(property="data", ref="#/components/schemas/Job")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(response=404, description="Not found", @OA\JsonContent(ref="#/components/schemas/ProblemDetails"))
+ * )
+ */
 class GetJob extends BaseAction
 {
     public function __construct(

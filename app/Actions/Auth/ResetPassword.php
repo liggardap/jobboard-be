@@ -11,6 +11,42 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 
+/**
+ * @OA\Post(
+ *     path="/auth/reset-password",
+ *     summary="Reset password using the emailed token",
+ *     tags={"Auth"},
+ *
+ *     @OA\RequestBody(
+ *         required=true,
+ *
+ *         @OA\JsonContent(
+ *             required={"token","email","password","password_confirmation"},
+ *
+ *             @OA\Property(property="token", type="string", example="eyJhbGciOiJIUzI1NiJ9..."),
+ *             @OA\Property(property="email", type="string", format="email", example="alice@example.com"),
+ *             @OA\Property(property="password", type="string", minLength=8, example="newpassword123"),
+ *             @OA\Property(property="password_confirmation", type="string", example="newpassword123")
+ *         )
+ *     ),
+ *
+ *     @OA\Response(
+ *         response=200,
+ *         description="Password reset",
+ *
+ *         @OA\JsonContent(
+ *
+ *             @OA\Property(property="success", type="boolean", example=true),
+ *             @OA\Property(property="data", type="object",
+ *                 @OA\Property(property="message", type="string")
+ *             )
+ *         )
+ *     ),
+ *
+ *     @OA\Response(response=401, description="Invalid or expired token", @OA\JsonContent(ref="#/components/schemas/ProblemDetails")),
+ *     @OA\Response(response=422, description="Validation error", @OA\JsonContent(ref="#/components/schemas/ProblemDetails"))
+ * )
+ */
 class ResetPassword extends BaseAction
 {
     public function handle(ResetPasswordRequest $request): JsonResponse
