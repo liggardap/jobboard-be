@@ -4,6 +4,8 @@ namespace Tests\Unit\Models;
 
 use App\Enums\UserRole;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -40,13 +42,13 @@ class UserTest extends TestCase
     {
         $user = User::factory()->company()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\HasOne::class, $user->company());
+        $this->assertInstanceOf(HasOne::class, $user->company());
     }
 
     public function test_has_many_applications_relationship(): void
     {
         $user = User::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class, $user->applications());
+        $this->assertInstanceOf(HasMany::class, $user->applications());
     }
 }

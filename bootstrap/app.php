@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\BaseException;
+use App\Http\Middleware\RequireRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -16,17 +17,23 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->alias(['role' => RequireRole::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (BaseException $e, Request $request) {
-            return response()->json([
+            $response = response()->json([
                 'type' => $e->getType(),
                 'title' => $e->getTitle(),
                 'status' => $e->getStatus(),
                 'instance' => $request->path(),
             ], $e->getStatus())
                 ->header('Content-Type', 'application/problem+json');
+
+            if ($e->getStatus() === 401) {
+                $response->header('WWW-Authenticate', 'Bearer');
+            }
+
+            return $response;
         });
 
         $exceptions->render(function (ValidationException $e, Request $request) {

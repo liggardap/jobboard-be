@@ -4,6 +4,8 @@ namespace Tests\Unit\Models;
 
 use App\Models\Company;
 use App\Models\Job;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -22,14 +24,14 @@ class CompanyTest extends TestCase
     {
         $company = Company::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class, $company->user());
+        $this->assertInstanceOf(BelongsTo::class, $company->user());
     }
 
     public function test_has_many_jobs_relationship(): void
     {
         $company = Company::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class, $company->jobs());
+        $this->assertInstanceOf(HasMany::class, $company->jobs());
     }
 
     public function test_deleting_company_cascades_to_jobs(): void
