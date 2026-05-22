@@ -2,6 +2,7 @@
 
 use App\Exceptions\BaseException;
 use App\Http\Middleware\RequireRole;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,6 +21,17 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias(['role' => RequireRole::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            return response()->json([
+                'type' => 'unauthorized',
+                'title' => 'Unauthorized',
+                'status' => 401,
+                'instance' => $request->path(),
+            ], 401)
+                ->header('Content-Type', 'application/problem+json')
+                ->header('WWW-Authenticate', 'Bearer');
+        });
+
         $exceptions->render(function (BaseException $e, Request $request) {
             $response = response()->json([
                 'type' => $e->getType(),

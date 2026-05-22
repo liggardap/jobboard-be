@@ -19,6 +19,8 @@ use App\Actions\Job\DeleteJob;
 use App\Actions\Job\GetJob;
 use App\Actions\Job\ListJobs;
 use App\Actions\Job\UpdateJob;
+use App\Actions\Me\GetMe;
+use App\Actions\Me\UpdateProfile;
 use App\Actions\Search\SearchJobs;
 use Illuminate\Support\Facades\Route;
 
@@ -45,6 +47,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/jobs/{id}/applications', ListJobApplications::class)->whereNumber('id')->middleware('role:company');
         Route::get('/me/applications', ListMyApplications::class);
         Route::delete('/applications/{id}', WithdrawApplication::class)->whereNumber('id');
+        Route::get('/me', GetMe::class);
+        Route::patch('/me', UpdateProfile::class);
     });
 
     Route::prefix('auth')->group(function () {
