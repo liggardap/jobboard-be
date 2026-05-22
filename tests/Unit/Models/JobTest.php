@@ -6,6 +6,9 @@ use App\Enums\EmploymentType;
 use App\Enums\JobStatus;
 use App\Models\Company;
 use App\Models\Job;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -40,21 +43,21 @@ class JobTest extends TestCase
     {
         $job = Job::factory()->active()->create();
 
-        $this->assertInstanceOf(\Carbon\Carbon::class, $job->fresh()->published_at);
+        $this->assertInstanceOf(Carbon::class, $job->fresh()->published_at);
     }
 
     public function test_belongs_to_company_relationship(): void
     {
         $job = Job::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class, $job->company());
+        $this->assertInstanceOf(BelongsTo::class, $job->company());
     }
 
     public function test_has_many_applications_relationship(): void
     {
         $job = Job::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class, $job->applications());
+        $this->assertInstanceOf(HasMany::class, $job->applications());
     }
 
     public function test_to_search_array_returns_correct_structure(): void

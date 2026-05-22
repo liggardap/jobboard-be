@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EmploymentType;
 use App\Enums\JobStatus;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -21,8 +22,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $salary_max
  * @property string $currency
  * @property JobStatus $status
- * @property \Carbon\Carbon|null $published_at
- * @property \Carbon\Carbon|null $expires_at
+ * @property Carbon|null $published_at
+ * @property Carbon|null $expires_at
  * @property-read Company $company
  */
 class Job extends BaseModel

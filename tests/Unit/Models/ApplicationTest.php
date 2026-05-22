@@ -4,6 +4,8 @@ namespace Tests\Unit\Models;
 
 use App\Enums\ApplicationStatus;
 use App\Models\Application;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -23,21 +25,21 @@ class ApplicationTest extends TestCase
     {
         $application = Application::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class, $application->job());
+        $this->assertInstanceOf(BelongsTo::class, $application->job());
     }
 
     public function test_belongs_to_user_relationship(): void
     {
         $application = Application::factory()->create();
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class, $application->user());
+        $this->assertInstanceOf(BelongsTo::class, $application->user());
     }
 
     public function test_unique_constraint_prevents_duplicate_application(): void
     {
         $application = Application::factory()->create();
 
-        $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
+        $this->expectException(UniqueConstraintViolationException::class);
 
         Application::factory()->create([
             'job_id' => $application->job_id,

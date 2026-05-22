@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\UserRole;
+use Carbon\Carbon;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -16,7 +17,7 @@ use Tymon\JWTAuth\Contracts\JWTSubject;
  * @property string $name
  * @property string $email
  * @property UserRole $role
- * @property \Carbon\Carbon|null $email_verified_at
+ * @property Carbon|null $email_verified_at
  */
 class User extends Authenticatable implements JWTSubject
 {
@@ -53,6 +54,8 @@ class User extends Authenticatable implements JWTSubject
 
     public function getJWTCustomClaims(): array
     {
-        return ['roles' => [$this->role->value]];
+        return [
+            'roles' => [$this->role->value],
+        ];
     }
 }
