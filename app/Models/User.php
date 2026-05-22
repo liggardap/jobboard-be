@@ -18,6 +18,7 @@ use Tymon\JWTAuth\Contracts\JWTSubject;
  * @property string $email
  * @property UserRole $role
  * @property Carbon|null $email_verified_at
+ * @property-read Company|null $company
  */
 class User extends Authenticatable implements JWTSubject
 {

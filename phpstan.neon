@@ -9,3 +9,5 @@ parameters:
         # Larastan types QueryBuilder::for() as Eloquent Builder, missing Spatie QueryBuilder methods
         - identifier: method.notFound
           path: app/Repositories/CompanyRepository.php
+        - identifier: method.notFound
+          path: app/Repositories/JobRepository.php
