@@ -117,4 +117,48 @@ class ApplicationServiceTest extends TestCase
 
         $this->assertTrue(true);
     }
+
+    public function test_get_by_id_returns_application_when_found(): void
+    {
+        $application = Application::factory()->create();
+
+        $repo = Mockery::mock(ApplicationRepositoryInterface::class);
+        $repo->shouldReceive('findById')->with($application->id)->andReturn($application);
+
+        $service = new ApplicationService($repo);
+        $result = $service->getById($application->id);
+
+        $this->assertInstanceOf(Application::class, $result);
+        $this->assertEquals($application->id, $result->id);
+    }
+
+    public function test_list_by_user_delegates_to_repository(): void
+    {
+        $user = User::factory()->create();
+        $paginator = Application::factory()->count(2)->create(['user_id' => $user->id])
+            ->toQuery()->paginate(15);
+
+        $repo = Mockery::mock(ApplicationRepositoryInterface::class);
+        $repo->shouldReceive('findByUserId')->with($user->id, 15)->andReturn($paginator);
+
+        $service = new ApplicationService($repo);
+        $result = $service->listByUser($user->id, 15);
+
+        $this->assertEquals($paginator, $result);
+    }
+
+    public function test_list_by_job_delegates_to_repository(): void
+    {
+        $job = Job::factory()->active()->create();
+        $paginator = Application::factory()->count(2)->create(['job_id' => $job->id])
+            ->toQuery()->paginate(15);
+
+        $repo = Mockery::mock(ApplicationRepositoryInterface::class);
+        $repo->shouldReceive('findByJobId')->with($job->id, 15)->andReturn($paginator);
+
+        $service = new ApplicationService($repo);
+        $result = $service->listByJob($job->id, 15);
+
+        $this->assertEquals($paginator, $result);
+    }
 }
