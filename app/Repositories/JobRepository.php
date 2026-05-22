@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Enums\JobStatus;
 use App\Interfaces\JobRepositoryInterface;
 use App\Models\Job;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -48,5 +49,13 @@ class JobRepository implements JobRepositoryInterface
     public function delete(Job $job): void
     {
         $job->delete();
+    }
+
+    public function chunkActive(int $size, callable $callback): void
+    {
+        Job::select(self::COLUMNS)
+            ->with('company:id,name,industry')
+            ->where('status', JobStatus::Active)
+            ->chunkById($size, $callback);
     }
 }
