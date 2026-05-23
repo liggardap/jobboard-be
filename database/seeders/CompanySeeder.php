@@ -38,6 +38,11 @@ class CompanySeeder extends Seeder
 
         Job::factory()->active()->count(5)->create(['company_id' => $acme->id]);
         Job::factory()->active()->count(4)->create(['company_id' => $bright->id]);
-        Job::factory()->count(2)->create(['company_id' => $acme->id]); // drafts
+        Job::factory()->count(2)->create(['company_id' => $acme->id]);
+
+        Company::factory()->verified()->count(20)->create()->each(function (Company $company) {
+            $count = rand(5000, 10000);
+            Job::factory()->active()->count($count)->create(['company_id' => $company->id]);
+        });
     }
 }

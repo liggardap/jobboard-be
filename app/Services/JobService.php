@@ -8,7 +8,7 @@ use App\Interfaces\JobServiceInterface;
 use App\Models\Company;
 use App\Models\Job;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Log;
 
 class JobService implements JobServiceInterface
 {
@@ -60,18 +60,35 @@ class JobService implements JobServiceInterface
     private function publishToIndex(Job $job): void
     {
         try {
-            Redis::publish('jobs:index', json_encode($job->toSearchArray()));
-        } catch (\Throwable) {
-            // Redis unavailable — job saved to MySQL, ES sync deferred (Phase 1 behaviour)
+            $subscribers = $this->redisPublish('jobs:index', json_encode($job->toSearchArray()));
+            Log::info('Redis publish jobs:index', ['job_id' => $job->id, 'title' => $job->title, 'subscribers' => $subscribers]);
+        } catch (\Throwable $e) {
+            Log::error('Redis publish failed', ['job_id' => $job->id, 'error' => $e->getMessage()]);
         }
     }
 
     private function publishToDelete(int $jobId): void
     {
         try {
-            Redis::publish('jobs:delete', json_encode(['id' => $jobId]));
-        } catch (\Throwable) {
-            // Redis unavailable — handled gracefully
+            $subscribers = $this->redisPublish('jobs:delete', json_encode(['id' => $jobId]));
+            Log::info('Redis publish jobs:delete', ['job_id' => $jobId, 'subscribers' => $subscribers]);
+        } catch (\Throwable $e) {
+            Log::error('Redis publish failed', ['job_id' => $jobId, 'error' => $e->getMessage()]);
         }
+    }
+
+    private function redisPublish(string $channel, string $message): int
+    {
+        $host = (string) config('database.redis.default.host', 'redis');
+        $port = (int) config('database.redis.default.port', 6379);
+
+        /** @var \Redis $client */
+        $client = new \Redis();
+        $client->connect($host, $port);
+
+        /** @var int $result */
+        $result = $client->publish($channel, $message);
+
+        return $result;
     }
 }
