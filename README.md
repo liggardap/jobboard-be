@@ -1,58 +1,218 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# jobboard-be
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel 13 REST API for a job board platform — companies post jobs, candidates search and apply. Built to demonstrate a production-grade backend stack with real-time search sync via Redis Pub/Sub.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+| Layer | Technology |
+|---|---|
+| API framework | PHP 8.3, Laravel 13 |
+| Database | MySQL 8.0 |
+| Cache / Pub/Sub | Redis 7 |
+| Search | Elasticsearch 8 |
+| Indexer | Node.js (Redis subscriber → ES writer) |
+| Auth | JWT (`tymon/jwt-auth`) |
+| Actions | `lorisleiva/laravel-actions` |
+| Query builder | `spatie/laravel-query-builder` |
+| API docs | `darkaonline/l5-swagger` (OpenAPI 3.0) |
+| Container runtime | Podman + podman-compose |
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Architecture
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+HTTP Request
+    │
+    ▼
+FormRequest (validation)
+    │
+    ▼
+Action (single use-case)
+    │
+    ▼
+Service (business logic)
+    │
+    ▼
+Repository (all Eloquent queries)
+    │
+    ▼
+Model (ORM, relationships)
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+**Search path (parallel read layer):**
 
-## Contributing
+```
+GET /v1/jobs?q=...
+    │
+    ▼
+SearchJobs Action
+    │
+    ▼
+SearchService (builds Query DSL)
+    │
+    ▼
+ElasticsearchRepository
+    │
+    ▼
+Elasticsearch 8
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+**Sync path (write → search index):**
 
-## Code of Conduct
+```
+JobService::create/update/delete
+    │
+    ▼
+Redis::publish("jobs:index" | "jobs:delete")
+    │
+    ▼
+Node.js indexer (subscriber)
+    │
+    ▼
+Elasticsearch 8
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+MySQL is always the source of truth. Elasticsearch is the read model for search only.
 
-## Security Vulnerabilities
+## Prerequisites
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- [Podman](https://podman.io/) + [podman-compose](https://github.com/containers/podman-compose)
+- Ports `8000`, `3306`, `6379`, `9200`, `8025`, `1025` must be free
 
-## License
+## Setup
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+# 1. Clone and copy environment file
+cp .env.example .env
+
+# 2. Start all containers (nginx, app, mysql, redis, elasticsearch, indexer, mailpit)
+make up
+
+# 3. Run migrations
+make migrate
+
+# 4. Seed roles and default data
+make seed
+
+# 5. (Optional) Full Elasticsearch reindex
+make es-reindex
+```
+
+## Environment Variables
+
+Key variables in `.env`:
+
+| Variable | Description |
+|---|---|
+| `APP_KEY` | Laravel application key |
+| `JWT_SECRET` | JWT signing secret (≥ 256 bits) |
+| `DB_HOST` / `DB_DATABASE` | MySQL connection |
+| `REDIS_HOST` | Redis connection |
+| `ELASTICSEARCH_HOST` | Elasticsearch URL |
+| `L5_SWAGGER_GENERATE_ALWAYS` | Auto-generate OpenAPI docs on each request (`true` in dev) |
+
+## Make Commands
+
+| Command | Description |
+|---|---|
+| `make up` | Start all containers |
+| `make down` | Stop containers |
+| `make remove` | Stop containers and prune unused images |
+| `make shell` | Open bash shell in app container |
+| `make migrate` | Run database migrations |
+| `make seed` | Seed roles and default data |
+| `make fresh` | Drop DB, re-migrate, and seed (local dev only) |
+| `make test` | Run full test suite |
+| `make coverage` | Run tests with 100% coverage enforcement |
+| `make pint` | Run Laravel Pint code style check |
+| `make phpstan` | Run PHPStan static analysis (level 5) |
+| `make logs` | Tail all container logs |
+| `make cache-clear` | Clear all Laravel caches |
+| `make es-reindex` | Full reindex: MySQL → Elasticsearch |
+| `make swagger` | Generate OpenAPI documentation |
+| `make artisan cmd=` | Run any artisan command |
+
+## Services
+
+| Service | URL / Port |
+|---|---|
+| API | http://localhost:8000/api/v1 |
+| Swagger UI | http://localhost:8000/api/documentation |
+| Mailpit UI | http://localhost:8025 |
+| MySQL | localhost:3306 |
+| Redis | localhost:6379 |
+| Elasticsearch | http://localhost:9200 |
+
+## API Endpoints
+
+All endpoints are prefixed with `/v1`. Authentication uses JWT Bearer tokens.
+
+### Auth
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/auth/register` | — | Register (candidate or company) |
+| POST | `/auth/login` | — | Login, returns JWT |
+| POST | `/auth/logout` | Bearer | Invalidate token |
+| POST | `/auth/refresh` | Bearer | Rotate JWT |
+| POST | `/auth/forgot-password` | — | Send password reset email |
+| POST | `/auth/reset-password` | — | Reset password via token |
+
+### Jobs
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/jobs` | — | Search jobs (Elasticsearch, supports `?q=`, filters, pagination) |
+| GET | `/jobs/{id}` | — | Get single job |
+| POST | `/jobs` | Bearer (company) | Create job posting |
+| PATCH | `/jobs/{id}` | Bearer (company/admin) | Update job |
+| DELETE | `/jobs/{id}` | Bearer (company/admin) | Delete job |
+| GET | `/companies/{id}/jobs` | Bearer | List jobs by company |
+
+### Companies
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/companies` | Bearer | List companies |
+| GET | `/companies/{id}` | Bearer | Get company |
+| POST | `/companies` | Bearer (company) | Create company profile |
+| PATCH | `/companies/{id}` | Bearer (company/admin) | Update company |
+
+### Applications
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/jobs/{id}/apply` | Bearer (candidate) | Apply to a job |
+| GET | `/jobs/{id}/applications` | Bearer (company) | List applications for a job |
+| GET | `/me/applications` | Bearer | List my applications |
+| DELETE | `/applications/{id}` | Bearer | Withdraw application |
+
+### Me
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/me` | Bearer | Get authenticated user profile |
+| PATCH | `/me` | Bearer | Update name or password |
+
+## Testing
+
+```bash
+make test        # full suite
+make coverage    # with 100% line/method coverage enforcement
+```
+
+Tests are split into three suites in `phpunit.xml`:
+
+- **Unit** — service and repository logic with mocked dependencies
+- **Feature** — full HTTP request/response cycles
+- **Integration** — repository tests against a real (in-memory SQLite) DB with `EXPLAIN` assertions
+
+## Elasticsearch Reindex
+
+Zero-downtime reindex using versioned indexes and atomic alias swap:
+
+```bash
+make es-reindex           # standard reindex
+make artisan cmd="es:reindex --fresh"   # drop all old indexes first
+```
+
+The command creates a new versioned index (e.g. `jobs_v1695000000`), bulk-indexes all active jobs, atomically swaps the `jobs` alias to the new index, then deletes old versioned indexes.
