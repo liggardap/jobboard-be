@@ -83,7 +83,15 @@ class ReindexElasticsearch extends Command
                 }
             }
         } catch (\Throwable) {
-            // No existing alias on first run
+            // No alias found — if a plain index with the alias name exists, delete it first
+            // so Elasticsearch can create the alias (an index and alias cannot share a name)
+            try {
+                $this->indexManager->getVersionedIndexes($alias);
+                $this->indexManager->deleteIndex($alias);
+                $this->line("Deleted plain index '{$alias}' to make way for alias.");
+            } catch (\Throwable) {
+                // Neither alias nor plain index exists — clean first run
+            }
         }
 
         $this->indexManager->updateAliases($actions);
