@@ -5,6 +5,7 @@ namespace App\Repositories;
 use App\Enums\JobStatus;
 use App\Interfaces\JobRepositoryInterface;
 use App\Models\Job;
+use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Spatie\QueryBuilder\QueryBuilder;
 
@@ -56,6 +57,15 @@ class JobRepository implements JobRepositoryInterface
         Job::select(self::COLUMNS)
             ->with('company:id,name,industry')
             ->where('status', JobStatus::Active)
+            ->chunkById($size, $callback);
+    }
+
+    public function chunkUpdatedSince(Carbon $since, int $size, callable $callback): void
+    {
+        Job::select(self::COLUMNS)
+            ->with('company:id,name,industry')
+            ->where('status', JobStatus::Active)
+            ->where('updated_at', '>=', $since)
             ->chunkById($size, $callback);
     }
 }

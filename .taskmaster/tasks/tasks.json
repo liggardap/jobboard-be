@@ -1,0 +1,1172 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": "1",
+        "title": "Project Setup and Docker Infrastructure",
+        "description": "Initialize Laravel 13 project with all required packages, Docker Compose infrastructure (nginx, php-fpm, mysql, redis, elasticsearch, mailpit, indexer), Makefile commands, and base configuration following stak-be patterns.",
+        "details": "1. Create Laravel 13 project:\n```bash\ncomposer create-project laravel/laravel . \"^13.0\"\n```\n\n2. Install required packages:\n```bash\ncomposer require tymon/jwt-auth:^2.0 lorisleiva/laravel-actions:^2.8 spatie/laravel-query-builder:^7.3 elastic/elasticsearch-php:^8.0 darkaonline/l5-swagger:^8.6\ncomposer require --dev larastan/larastan:^3.9 laravel/pint:^1.27 mockery/mockery:^1.6\n```\n\n3. Create docker-compose.yml with services:\n- nginx:alpine on port 8000\n- app (php-fpm 8.3) with custom php-fpm.conf\n- mysql:8.0 on port 3306\n- redis:7-alpine on port 6379 with AOF\n- elasticsearch:8.13.4 on port 9200 (single-node, security disabled)\n- mailpit on ports 8025/1025\n- indexer service (Node.js) depends on redis/elasticsearch\n\n4. Create docker/php-fpm.conf:\n```ini\n[www]\npm = dynamic\npm.max_children = 20\npm.start_servers = 5\npm.min_spare_servers = 2\npm.max_spare_servers = 8\npm.max_requests = 500\nrequest_terminate_timeout = 30s\nslowlog = /var/log/php-fpm/slow.log\nrequest_slowlog_timeout = 3s\n```\n\n5. Create docker/php.ini with OPcache:\n```ini\nopcache.enable = 1\nopcache.memory_consumption = 256\nopcache.max_accelerated_files = 20000\nopcache.validate_timestamps = 1\n```\n\n6. Create Dockerfile for PHP app:\n```dockerfile\nFROM php:8.3-fpm\nRUN docker-php-ext-install pdo_mysql bcmath\nCOPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/www.conf\nCOPY docker/php.ini /usr/local/etc/php/conf.d/99-custom.ini\n```\n\n7. Create Makefile with targets: up, down, shell, artisan, migrate, seed, fresh, test, pint, phpstan, logs, cache-clear, indexer, es-reindex\n\n8. Configure .env.example with:\n- DB_CONNECTION=mysql, DB_HOST=mysql, DB_DATABASE=jobboard\n- REDIS_HOST=redis\n- ELASTICSEARCH_HOST=elasticsearch:9200\n- JWT_SECRET placeholder\n- MAIL_MAILER=smtp, MAIL_HOST=mailpit, MAIL_PORT=1025\n\n9. Create nginx/default.conf for PHP-FPM passthrough\n\n10. Publish JWT config: php artisan vendor:publish --provider=\"Tymon\\JWTAuth\\Providers\\LaravelServiceProvider\"",
+        "testStrategy": "- Verify `make up` starts all containers without errors\n- Verify `podman-compose ps` shows all services healthy\n- Verify `make shell` opens app container bash\n- Verify `make artisan cmd=\"--version\"` returns Laravel 13.x\n- Test MySQL connection: `make artisan cmd=\"tinker\" --command=\"DB::connection()->getPdo()\"`\n- Test Redis connection: `make artisan cmd=\"tinker\" --command=\"Redis::ping()\"`\n- Test Elasticsearch: `curl http://localhost:9200/_cluster/health`\n- Run `make pint` and `make phpstan` to verify tooling works",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Initialize Laravel 13 Project with Required PHP Packages",
+            "description": "Create Laravel 13 project and install all required Composer packages including JWT, actions, query builder, Elasticsearch client, Swagger, and dev dependencies.",
+            "dependencies": [],
+            "details": "1. Run `composer create-project laravel/laravel . \"^13.0\"` to initialize Laravel 13 in the current directory.\n\n2. Install production packages:\n```bash\ncomposer require tymon/jwt-auth:^2.0 lorisleiva/laravel-actions:^2.8 spatie/laravel-query-builder:^7.3 elastic/elasticsearch-php:^8.0 darkaonline/l5-swagger:^8.6\n```\n\n3. Install dev packages:\n```bash\ncomposer require --dev larastan/larastan:^3.9 laravel/pint:^1.27 mockery/mockery:^1.6\n```\n\n4. Publish JWT configuration:\n```bash\nphp artisan vendor:publish --provider=\"Tymon\\JWTAuth\\Providers\\LaravelServiceProvider\"\n```\n\n5. Configure config/jwt.php with HS256 algorithm, never accept alg:none, set required claims (iss, sub, aud, jti, iat, exp).\n\n6. Generate JWT secret: `php artisan jwt:secret`\n\n7. Configure .env.example with all required environment variables:\n- DB_CONNECTION=mysql, DB_HOST=mysql, DB_DATABASE=jobboard, DB_USERNAME=root, DB_PASSWORD=secret\n- REDIS_HOST=redis, REDIS_PORT=6379\n- ELASTICSEARCH_HOST=elasticsearch:9200\n- JWT_SECRET placeholder\n- MAIL_MAILER=smtp, MAIL_HOST=mailpit, MAIL_PORT=1025",
+            "status": "done",
+            "testStrategy": "- Verify `php artisan --version` returns Laravel 13.x\n- Verify all packages installed by checking composer.json dependencies section\n- Verify config/jwt.php exists after publishing\n- Verify .env.example contains all required variables for MySQL, Redis, Elasticsearch, JWT, and Mailpit",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:00:40.005Z"
+          },
+          {
+            "id": 2,
+            "title": "Create Docker Compose Infrastructure with All Services",
+            "description": "Create docker-compose.yml with nginx, php-fpm app, mysql, redis with AOF, elasticsearch single-node, mailpit, and indexer services with correct ports and dependencies.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create docker-compose.yml in project root with all services:\n\n```yaml\nversion: '3.8'\nservices:\n  nginx:\n    image: nginx:alpine\n    ports: [\"8000:80\"]\n    volumes:\n      - ./:/var/www/html\n      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf\n    depends_on: [app]\n\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    volumes:\n      - ./:/var/www/html\n    environment:\n      - DB_HOST=mysql\n      - REDIS_HOST=redis\n      - ELASTICSEARCH_HOST=elasticsearch:9200\n    depends_on: [mysql, redis]\n\n  mysql:\n    image: mysql:8.0\n    environment:\n      MYSQL_DATABASE: jobboard\n      MYSQL_ROOT_PASSWORD: secret\n    ports: [\"3306:3306\"]\n    volumes:\n      - mysql_data:/var/lib/mysql\n      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf\n\n  redis:\n    image: redis:7-alpine\n    command: [\"redis-server\", \"--appendonly\", \"yes\"]\n    ports: [\"6379:6379\"]\n    volumes:\n      - redis_data:/data\n\n  elasticsearch:\n    image: elasticsearch:8.13.4\n    environment:\n      - discovery.type=single-node\n      - xpack.security.enabled=false\n      - ES_JAVA_OPTS=-Xms512m -Xmx512m\n    ports: [\"9200:9200\"]\n    volumes:\n      - es_data:/usr/share/elasticsearch/data\n\n  mailpit:\n    image: axllent/mailpit\n    ports: [\"8025:8025\", \"1025:1025\"]\n\n  indexer:\n    build: ./indexer\n    command: node index.js\n    environment:\n      - REDIS_URL=redis://redis:6379\n      - ES_URL=http://elasticsearch:9200\n    depends_on: [redis, elasticsearch]\n\nvolumes:\n  mysql_data:\n  redis_data:\n  es_data:\n```\n\n2. Create nginx/default.conf for PHP-FPM passthrough with fastcgi_pass app:9000 and proper location blocks for / and PHP files.",
+            "status": "done",
+            "testStrategy": "- Verify all services defined in docker-compose.yml with correct image versions\n- Verify port mappings match PRD (8000, 3306, 6379, 9200, 8025, 1025)\n- Verify volume mounts for persistence (mysql_data, redis_data, es_data)\n- Verify indexer depends_on includes redis and elasticsearch\n- Verify nginx depends_on app, and app depends_on mysql and redis",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:08:14.949Z"
+          },
+          {
+            "id": 3,
+            "title": "Configure PHP-FPM and OPcache with Dockerfile",
+            "description": "Create Dockerfile for PHP 8.3-fpm, docker/php-fpm.conf with pm=dynamic settings, docker/php.ini with OPcache configuration, and MySQL slow query log configuration.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create Dockerfile in project root:\n```dockerfile\nFROM php:8.3-fpm\n\nRUN apt-get update && apt-get install -y \\\n    libzip-dev \\\n    unzip \\\n    && docker-php-ext-install pdo_mysql bcmath zip opcache \\\n    && rm -rf /var/lib/apt/lists/*\n\nCOPY --from=composer:latest /usr/bin/composer /usr/bin/composer\n\nCOPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/www.conf\nCOPY docker/php.ini /usr/local/etc/php/conf.d/99-custom.ini\n\nWORKDIR /var/www/html\n```\n\n2. Create docker/php-fpm.conf:\n```ini\n[www]\npm = dynamic\npm.max_children = 20\npm.start_servers = 5\npm.min_spare_servers = 2\npm.max_spare_servers = 8\npm.max_requests = 500\nrequest_terminate_timeout = 30s\nslowlog = /var/log/php-fpm/slow.log\nrequest_slowlog_timeout = 3s\n```\n\n3. Create docker/php.ini:\n```ini\nopcache.enable = 1\nopcache.memory_consumption = 256\nopcache.max_accelerated_files = 20000\nopcache.validate_timestamps = 1\n\n[Date]\ndate.timezone = UTC\n```\n\n4. Create docker/mysql/my.cnf for slow query logging:\n```ini\n[mysqld]\nslow_query_log = 1\nslow_query_log_file = /var/log/mysql/slow.log\nlong_query_time = 0.5\nlog_queries_not_using_indexes = 1\n```\n\n5. Create directory structure: mkdir -p docker/mysql nginx",
+            "status": "done",
+            "testStrategy": "- Verify Dockerfile builds successfully with `podman build -t jobboard-app .`\n- Verify PHP-FPM config has pm=dynamic and pm.max_requests=500\n- Verify OPcache enabled with opcache.enable=1\n- Verify slow query log configured with long_query_time=0.5\n- Verify request_terminate_timeout set to 30s",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:08:16.212Z"
+          },
+          {
+            "id": 4,
+            "title": "Create Makefile with Development Commands",
+            "description": "Create Makefile with all required targets: up, down, shell, artisan, migrate, seed, fresh, test, pint, phpstan, logs, cache-clear, indexer, es-reindex using podman-compose.",
+            "dependencies": [
+              2
+            ],
+            "details": "1. Create Makefile in project root:\n```makefile\n.PHONY: up down shell artisan migrate seed fresh test pint phpstan logs cache-clear indexer es-reindex\n\nup:\n\tpodman-compose up -d\n\ndown:\n\tpodman-compose down\n\nshell:\n\tpodman-compose exec app bash\n\nartisan:\n\tpodman-compose exec app php artisan $(cmd)\n\nmigrate:\n\tpodman-compose exec app php artisan migrate\n\nseed:\n\tpodman-compose exec app php artisan db:seed\n\nfresh:\n\tpodman-compose exec app php artisan migrate:fresh --seed\n\ntest:\n\tpodman-compose exec app php artisan test\n\ntest-coverage:\n\tpodman-compose exec app php artisan test --coverage --min=100\n\npint:\n\tpodman-compose exec app ./vendor/bin/pint --test\n\npint-fix:\n\tpodman-compose exec app ./vendor/bin/pint\n\nphpstan:\n\tpodman-compose exec app ./vendor/bin/phpstan analyse --memory-limit=512M\n\nlogs:\n\tpodman-compose logs -f\n\ncache-clear:\n\tpodman-compose exec app php artisan cache:clear\n\tpodman-compose exec app php artisan config:clear\n\tpodman-compose exec app php artisan route:clear\n\tpodman-compose exec app php artisan view:clear\n\nindexer:\n\tpodman-compose exec indexer node index.js\n\nes-reindex:\n\tpodman-compose exec app php artisan es:reindex\n```\n\n2. Create phpstan.neon for static analysis configuration:\n```neon\nincludes:\n    - ./vendor/larastan/larastan/extension.neon\n\nparameters:\n    paths:\n        - app\n    level: 5\n    ignoreErrors: []\n    checkMissingIterableValueType: false\n```\n\n3. Create pint.json for code style configuration (Laravel preset):\n```json\n{\n    \"preset\": \"laravel\",\n    \"rules\": {\n        \"simplified_null_return\": true,\n        \"no_unused_imports\": true\n    }\n}\n```",
+            "status": "done",
+            "testStrategy": "- Verify `make up` starts all containers without errors\n- Verify `podman-compose ps` shows all 7 services (nginx, app, mysql, redis, elasticsearch, mailpit, indexer)\n- Verify `make shell` opens bash shell in app container\n- Verify `make artisan cmd=\"--version\"` returns Laravel 13.x version\n- Verify `make pint` runs code style check\n- Verify `make phpstan` runs static analysis",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:08:17.488Z"
+          },
+          {
+            "id": 5,
+            "title": "Verify Full Infrastructure and Service Connectivity",
+            "description": "Start all containers, verify service health, test connectivity between services (MySQL, Redis, Elasticsearch), and confirm the full development environment is operational.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "1. Start all containers:\n```bash\nmake up\n```\n\n2. Wait for services to be healthy and verify with:\n```bash\npodman-compose ps\n```\n\n3. Test MySQL connection:\n```bash\nmake artisan cmd=\"tinker --execute=DB::connection()->getPdo()\"\n```\n\n4. Test Redis connection:\n```bash\nmake artisan cmd=\"tinker --execute=Redis::ping()\"\n```\n\n5. Test Elasticsearch connection:\n```bash\ncurl http://localhost:9200/_cluster/health\n```\n\n6. Verify nginx serves Laravel:\n```bash\ncurl http://localhost:8000\n```\n\n7. Verify Mailpit UI accessible:\n```bash\ncurl -s http://localhost:8025 | head -1\n```\n\n8. Test that container logs are accessible:\n```bash\nmake logs\n```\n\n9. Test basic artisan commands:\n```bash\nmake artisan cmd=\"route:list\"\nmake artisan cmd=\"config:show database\"\n```\n\n10. Verify no port conflicts on 8000, 3306, 6379, 9200, 8025, 1025 before starting.",
+            "status": "done",
+            "testStrategy": "- Verify all 7 services show as running in `podman-compose ps`\n- Verify MySQL connection succeeds via tinker\n- Verify Redis ping returns PONG\n- Verify Elasticsearch cluster health returns green or yellow status\n- Verify http://localhost:8000 returns Laravel welcome page or 200 response\n- Verify Mailpit UI loads at http://localhost:8025\n- Verify `make pint` and `make phpstan` run without configuration errors",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:32:24.184Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T14:32:24.184Z"
+      },
+      {
+        "id": "2",
+        "title": "Base Architecture Layer: Models, Interfaces, and Response Classes",
+        "description": "Create the foundational architecture components: BaseModel, BaseResponse, PaginationResource, custom exceptions (NotFoundException, ForbiddenException, ConflictException), and all interface contracts for repositories and services.",
+        "details": "1. Create app/Models/BaseModel.php:\n```php\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Model;\nuse Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\n\nabstract class BaseModel extends Model\n{\n    use HasFactory;\n\n    protected $guarded = ['id'];\n}\n```\n\n2. Create app/Http/Resources/BaseResponse.php:\n```php\nnamespace App\\Http\\Resources;\n\nuse Illuminate\\Http\\JsonResponse;\n\nclass BaseResponse\n{\n    public static function success(mixed $data = null, int $status = 200, array $meta = []): JsonResponse\n    {\n        $response = ['success' => true];\n        if ($data !== null) {\n            $response['data'] = $data;\n        }\n        if (!empty($meta)) {\n            $response['meta'] = $meta;\n        }\n        return response()->json($response, $status);\n    }\n\n    public static function created(mixed $data = null): JsonResponse\n    {\n        return self::success($data, 201);\n    }\n\n    public static function noContent(): JsonResponse\n    {\n        return response()->json(null, 204);\n    }\n}\n```\n\n3. Create app/Http/Resources/PaginationResource.php wrapping LengthAwarePaginator with snake_case meta\n\n4. Create app/Exceptions/BaseException.php extending Exception with $status, $type, $title properties\n\n5. Create exceptions: NotFoundException (404), ForbiddenException (403), ConflictException (409)\n\n6. Configure bootstrap/app.php withExceptions() for RFC 9457 Problem Details:\n```php\n->withExceptions(function (Exceptions $exceptions) {\n    $exceptions->render(function (BaseException $e, Request $request) {\n        return response()->json([\n            'type' => $e->getType(),\n            'title' => $e->getTitle(),\n            'status' => $e->getStatus(),\n            'instance' => $request->path(),\n        ], $e->getStatus())\n        ->header('Content-Type', 'application/problem+json');\n    });\n\n    $exceptions->render(function (ValidationException $e, Request $request) {\n        return response()->json([\n            'type' => 'validation_error',\n            'title' => 'Validation Failed',\n            'status' => 422,\n            'instance' => $request->path(),\n            'errors' => $e->errors(),\n        ], 422)->header('Content-Type', 'application/problem+json');\n    });\n})\n```\n\n7. Create interfaces in app/Interfaces/:\n- JobRepositoryInterface (findById, findByCompanyId, create, update, delete)\n- JobServiceInterface (getById, listByCompany, create, update, delete)\n- CompanyRepositoryInterface\n- CompanyServiceInterface\n- ApplicationRepositoryInterface\n- ApplicationServiceInterface\n- SearchRepositoryInterface (search, index, delete)\n- SearchServiceInterface (searchJobs)\n\n8. Create app/Actions/BaseAction.php extending \\Lorisleiva\\Actions\\Concerns\\AsAction with common utilities",
+        "testStrategy": "- Unit test BaseResponse::success() returns correct JSON structure with 200 status\n- Unit test BaseResponse::created() returns 201 status\n- Unit test PaginationResource wraps paginator with correct meta keys (current_page, per_page, total, last_page)\n- Unit test each exception returns correct status code and Problem Details structure\n- Feature test validation error returns 422 with application/problem+json Content-Type\n- Verify all interfaces have matching method signatures without implementation conflicts",
+        "priority": "high",
+        "dependencies": [
+          "1"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create BaseModel and BaseAction Foundation Classes",
+            "description": "Implement the abstract BaseModel extending Eloquent Model with HasFactory trait and guarded id, plus BaseAction using lorisleiva/laravel-actions AsAction trait for common action utilities.",
+            "dependencies": [],
+            "details": "Create app/Models/BaseModel.php as an abstract class extending Illuminate\\Database\\Eloquent\\Model with the HasFactory trait. Set protected $guarded = ['id'] to allow mass assignment on all fields except id. All domain models (User, Company, Job, Application) will extend this base. Create app/Actions/BaseAction.php that uses the \\Lorisleiva\\Actions\\Concerns\\AsAction trait, providing a consistent base for all action classes. Ensure proper namespace declarations and import statements following PSR-4 autoloading standards.",
+            "status": "done",
+            "testStrategy": "Unit test verifying BaseModel has $guarded = ['id'] and uses HasFactory trait. Verify BaseAction class exists and uses AsAction trait. Test that a concrete model extending BaseModel inherits the guarded property correctly.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:35:27.469Z"
+          },
+          {
+            "id": 2,
+            "title": "Create BaseResponse and PaginationResource for API Responses",
+            "description": "Implement BaseResponse utility class with static success(), created(), and noContent() methods, plus PaginationResource wrapping LengthAwarePaginator with snake_case meta keys.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Http/Resources/BaseResponse.php with static methods: success(mixed $data = null, int $status = 200, array $meta = []) returning JsonResponse with {success: true, data?, meta?} structure; created(mixed $data = null) calling success with 201; noContent() returning 204 with null body. Create app/Http/Resources/PaginationResource.php wrapping LengthAwarePaginator and exposing meta with snake_case keys: current_page, per_page, total, last_page. All 2xx responses use Content-Type: application/json. Ensure response structure matches stak-be patterns exactly.",
+            "status": "done",
+            "testStrategy": "Unit test BaseResponse::success() returns JSON with {success: true, data} and 200 status. Test created() returns 201. Test noContent() returns 204. Test PaginationResource wraps paginator with correct meta keys (current_page, per_page, total, last_page) in snake_case.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:37:00.372Z"
+          },
+          {
+            "id": 3,
+            "title": "Create Custom Exception Classes with RFC 9457 Problem Details",
+            "description": "Implement BaseException with status/type/title properties, and concrete exceptions: NotFoundException (404), ForbiddenException (403), ConflictException (409) following RFC 9457 Problem Details format.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Exceptions/BaseException.php extending Exception with protected int $status, string $type, and string $title properties, plus getter methods getStatus(), getType(), getTitle(). Create app/Exceptions/NotFoundException.php extending BaseException with status=404, type='not_found', title='Resource Not Found'. Create app/Exceptions/ForbiddenException.php with status=403, type='forbidden', title='Access Forbidden'. Create app/Exceptions/ConflictException.php with status=409, type='conflict', title='Resource Conflict'. Each accepts optional message in constructor. All exceptions will be rendered as RFC 9457 Problem Details JSON.",
+            "status": "done",
+            "testStrategy": "Unit test BaseException has getStatus(), getType(), getTitle() methods. Test NotFoundException returns 404 status and 'not_found' type. Test ForbiddenException returns 403 and 'forbidden'. Test ConflictException returns 409 and 'conflict'. Verify custom messages can be passed to constructors.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:37:01.640Z"
+          },
+          {
+            "id": 4,
+            "title": "Configure Exception Handler for RFC 9457 Problem Details Responses",
+            "description": "Configure bootstrap/app.php withExceptions() to render BaseException and ValidationException as RFC 9457 Problem Details with application/problem+json Content-Type header.",
+            "dependencies": [
+              3
+            ],
+            "details": "In bootstrap/app.php, configure withExceptions() callback with two render handlers: 1) For BaseException, return JsonResponse with {type, title, status, instance: request->path()} and Content-Type: application/problem+json header at the exception's status code. 2) For ValidationException, return {type: 'validation_error', title: 'Validation Failed', status: 422, instance: request->path(), errors: e->errors()} with 422 status and application/problem+json header. Import Illuminate\\Http\\Request, Illuminate\\Validation\\ValidationException, and App\\Exceptions\\BaseException. This ensures all 4xx/5xx errors follow RFC 9457 format.",
+            "status": "pending",
+            "testStrategy": "Feature test throwing NotFoundException returns 404 with Content-Type: application/problem+json and correct body structure. Test throwing ForbiddenException returns 403 with problem+json. Test ValidationException returns 422 with errors array and problem+json Content-Type. Verify 'instance' field contains the request path.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Create All Interface Contracts for Repositories and Services",
+            "description": "Create app/Interfaces directory with all interface contracts: JobRepositoryInterface, JobServiceInterface, CompanyRepositoryInterface, CompanyServiceInterface, ApplicationRepositoryInterface, ApplicationServiceInterface, SearchRepositoryInterface, and SearchServiceInterface.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Interfaces/ directory with 8 interface files: 1) JobRepositoryInterface: findById(int), findByCompanyId(int, int), create(array), update(Job, array), delete(Job). 2) JobServiceInterface: getById(int), listByCompany(int), create(Company, array), update(Job, array), delete(Job). 3) CompanyRepositoryInterface: findById(int), findByUserId(int), paginate(int), create(array), update(Company, array). 4) CompanyServiceInterface: getById(int), list(), create(User, array), update(Company, User, array). 5) ApplicationRepositoryInterface: findById(int), findByUserAndJob(int, int), findByUserId(int, int), findByJobId(int, int), create(array), delete(Application). 6) ApplicationServiceInterface: apply(User, Job, ?string), withdraw(Application, User), listByUser(User), listByJob(Job, User). 7) SearchRepositoryInterface: search(array, int, int), index(int, array), delete(int). 8) SearchServiceInterface: searchJobs(array). Use proper PHP 8.3 type hints and nullable types where appropriate.",
+            "status": "done",
+            "testStrategy": "Verify all 8 interface files exist in app/Interfaces/ with correct method signatures. Run PHPStan to verify interfaces have valid type hints. Verify interfaces follow naming conventions and method signatures align with PRD specifications. Test that interfaces can be implemented by concrete classes without signature conflicts.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:37:02.931Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T14:42:37.013Z"
+      },
+      {
+        "id": "3",
+        "title": "Database Migrations with Optimized Indexes",
+        "description": "Create all database migrations (users, companies, jobs, applications) with the exact schema from the PRD including all composite indexes, foreign keys, and enums. Configure slow query log for development.",
+        "details": "1. Create migration for users table:\n```php\nSchema::create('users', function (Blueprint $table) {\n    $table->id();\n    $table->string('name');\n    $table->string('email')->unique();\n    $table->string('password');\n    $table->enum('role', ['admin', 'company', 'candidate'])->default('candidate');\n    $table->timestamp('email_verified_at')->nullable();\n    $table->rememberToken();\n    $table->timestamps();\n    $table->index('email', 'idx_email');\n    $table->index('role', 'idx_role');\n});\n```\n\n2. Create migration for companies table:\n```php\nSchema::create('companies', function (Blueprint $table) {\n    $table->id();\n    $table->foreignId('user_id')->constrained()->cascadeOnDelete();\n    $table->string('name');\n    $table->text('description')->nullable();\n    $table->string('industry', 100)->nullable();\n    $table->string('city', 100)->nullable();\n    $table->string('country', 100)->default('ID');\n    $table->string('website')->nullable();\n    $table->boolean('is_verified')->default(false);\n    $table->timestamps();\n    $table->index('user_id', 'idx_user_id');\n    $table->index(['industry', 'country'], 'idx_industry_country');\n});\n```\n\n3. Create migration for jobs table with all composite indexes:\n```php\nSchema::create('jobs', function (Blueprint $table) {\n    $table->id();\n    $table->foreignId('company_id')->constrained()->cascadeOnDelete();\n    $table->string('title');\n    $table->text('description');\n    $table->string('category', 100);\n    $table->enum('employment_type', ['full_time', 'part_time', 'contract', 'internship']);\n    $table->string('location_city', 100)->nullable();\n    $table->string('location_country', 100)->default('ID');\n    $table->boolean('is_remote')->default(false);\n    $table->unsignedInteger('salary_min')->nullable();\n    $table->unsignedInteger('salary_max')->nullable();\n    $table->char('currency', 3)->default('IDR');\n    $table->enum('status', ['draft', 'active', 'closed'])->default('draft');\n    $table->timestamp('published_at')->nullable();\n    $table->timestamp('expires_at')->nullable();\n    $table->timestamps();\n    $table->index(['company_id', 'status'], 'idx_company_status');\n    $table->index(['status', 'published_at'], 'idx_status_published');\n    $table->index(['category', 'status'], 'idx_category_status');\n    $table->index(['location_country', 'location_city', 'status'], 'idx_location_status');\n});\n```\n\n4. Create migration for applications table:\n```php\nSchema::create('applications', function (Blueprint $table) {\n    $table->id();\n    $table->foreignId('job_id')->constrained()->cascadeOnDelete();\n    $table->foreignId('user_id')->constrained()->cascadeOnDelete();\n    $table->text('cover_letter')->nullable();\n    $table->enum('status', ['pending', 'reviewed', 'shortlisted', 'rejected'])->default('pending');\n    $table->timestamp('applied_at')->useCurrent();\n    $table->timestamp('updated_at')->nullable();\n    $table->unique(['job_id', 'user_id'], 'uq_job_user');\n    $table->index(['user_id', 'status'], 'idx_user_status');\n    $table->index(['job_id', 'status'], 'idx_job_status');\n});\n```\n\n5. Create MySQL config file docker/mysql/my.cnf:\n```ini\n[mysqld]\nslow_query_log = 1\nslow_query_log_file = /var/log/mysql/slow.log\nlong_query_time = 0.5\nlog_queries_not_using_indexes = 1\n```\n\n6. Mount config in docker-compose.yml mysql service\n\n7. Create database factories for User, Company, Job, Application in database/factories/",
+        "testStrategy": "- Run `make migrate` and verify all tables created\n- Verify indexes exist using `SHOW INDEX FROM jobs`\n- Test foreign key constraints: delete company cascades jobs\n- Test unique constraint: duplicate (job_id, user_id) in applications fails\n- Verify composite index order matches query patterns via EXPLAIN\n- Test `make fresh` drops and recreates all tables\n- Seed test data and verify slow query log captures queries over 500ms",
+        "priority": "high",
+        "dependencies": [
+          "1"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create Users Table Migration with Email and Role Indexes",
+            "description": "Create the users table migration with all columns from PRD schema including role enum, email_verified_at, remember_token, and add single-column indexes for email and role columns.",
+            "dependencies": [],
+            "details": "Create migration file database/migrations/xxxx_create_users_table.php using php artisan make:migration. Define Schema::create('users') with: id (bigint unsigned auto_increment primary key), name (varchar 255 not null), email (varchar 255 unique not null), password (varchar 255 not null), role (enum ['admin','company','candidate'] default 'candidate'), email_verified_at (timestamp nullable), remember_token (varchar 100 nullable), timestamps. Add indexes: $table->index('email', 'idx_email') and $table->index('role', 'idx_role'). Include proper down() method with Schema::dropIfExists('users'). Note: email column already has a unique constraint which creates an index, but idx_email is explicitly added per PRD spec.",
+            "status": "done",
+            "testStrategy": "Run make migrate and verify users table created. Execute SHOW INDEX FROM users to confirm idx_email and idx_role exist. Test unique constraint by attempting duplicate email insert - should fail with integrity violation. Verify role enum only accepts admin/company/candidate values.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:54:28.833Z"
+          },
+          {
+            "id": 2,
+            "title": "Create Companies Table Migration with Foreign Key and Composite Index",
+            "description": "Create the companies table migration with user_id foreign key cascade delete, all company columns from PRD, and composite index on (industry, country) for common filter queries.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create migration database/migrations/xxxx_create_companies_table.php. Define Schema::create('companies') with: id (bigint unsigned pk), user_id (foreignId constrained to users with cascadeOnDelete), name (varchar 255 not null), description (text nullable), industry (varchar 100 nullable), city (varchar 100 nullable), country (varchar 100 default 'ID'), website (varchar 255 nullable), is_verified (boolean default false), timestamps. Add indexes: $table->index('user_id', 'idx_user_id') and $table->index(['industry', 'country'], 'idx_industry_country'). Composite index supports WHERE industry = ? AND country = ? queries. Include down() with Schema::dropIfExists('companies').",
+            "status": "pending",
+            "testStrategy": "Run migration and verify companies table exists with correct columns. Test cascade delete: create user with company, delete user, verify company deleted. Execute SHOW INDEX FROM companies to verify idx_user_id and idx_industry_country composite index exist. Verify composite index column order is industry then country.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create Jobs Table Migration with All Four Composite Indexes",
+            "description": "Create the jobs table migration with company_id foreign key, employment_type and status enums, all job columns from PRD, and four composite indexes optimized for dashboard, listing, category, and location queries.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create migration database/migrations/xxxx_create_jobs_table.php. Define Schema::create('jobs') with: id, company_id (foreignId constrained cascadeOnDelete), title (varchar 255), description (text), category (varchar 100), employment_type (enum ['full_time','part_time','contract','internship']), location_city (varchar 100 nullable), location_country (varchar 100 default 'ID'), is_remote (boolean default false), salary_min (unsignedInteger nullable), salary_max (unsignedInteger nullable), currency (char 3 default 'IDR'), status (enum ['draft','active','closed'] default 'draft'), published_at (timestamp nullable), expires_at (timestamp nullable), timestamps. Add four composite indexes: idx_company_status (company_id, status) for company dashboard, idx_status_published (status, published_at) for active jobs listing, idx_category_status (category, status) for category filter, idx_location_status (location_country, location_city, status) for location filter. Include down() method.",
+            "status": "pending",
+            "testStrategy": "Verify all composite indexes exist via SHOW INDEX FROM jobs. Test cascade delete: delete company, verify all jobs deleted. Run EXPLAIN on WHERE company_id = ? AND status = ? to verify idx_company_status used (type should be ref, not ALL). Test enum constraints reject invalid values. Verify composite index column order matches PRD specifications.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Create Applications Table Migration with Unique Constraint and Composite Indexes",
+            "description": "Create the applications table migration with dual foreign keys (job_id, user_id), unique constraint preventing duplicate applications, status enum, and composite indexes for user and job application queries.",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "Create migration database/migrations/xxxx_create_applications_table.php. Define Schema::create('applications') with: id, job_id (foreignId constrained cascadeOnDelete), user_id (foreignId constrained cascadeOnDelete), cover_letter (text nullable), status (enum ['pending','reviewed','shortlisted','rejected'] default 'pending'), applied_at (timestamp useCurrent instead of created_at), updated_at (timestamp nullable). Note: this table does NOT use standard timestamps() - applied_at replaces created_at. Add unique constraint: $table->unique(['job_id', 'user_id'], 'uq_job_user') to prevent duplicate applications. Add indexes: idx_user_status (user_id, status) for 'my applications' query, idx_job_status (job_id, status) for 'applications for this job' query. Include down() method.",
+            "status": "pending",
+            "testStrategy": "Test unique constraint: insert application, attempt duplicate (same job_id, user_id), verify integrity violation. Test cascade: delete job, verify applications deleted; delete user, verify applications deleted. Run EXPLAIN on WHERE user_id = ? AND status = ? to verify idx_user_status used. Verify applied_at defaults to current timestamp on insert.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Configure MySQL Slow Query Log and Create Database Factories",
+            "description": "Create MySQL configuration file for slow query logging in development, update docker-compose to mount the config, and create Laravel model factories for User, Company, Job, and Application with proper enum values.",
+            "dependencies": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "details": "Create docker/mysql/my.cnf with [mysqld] section containing: slow_query_log = 1, slow_query_log_file = /var/log/mysql/slow.log, long_query_time = 0.5, log_queries_not_using_indexes = 1. Ensure docker-compose.yml mysql service mounts ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf. Create database/factories/UserFactory.php with name, email, password (bcrypt), role (fake()->randomElement(['admin','company','candidate'])). Create database/factories/CompanyFactory.php with user_id, name, description, industry, city, country, website, is_verified. Create database/factories/JobFactory.php with company_id, title, description, category, employment_type (enum values), location_city, location_country, is_remote, salary_min, salary_max, currency, status (enum values), published_at, expires_at. Create database/factories/ApplicationFactory.php with job_id, user_id, cover_letter, status (enum values). Factories should use PHP 8.3 enum values where applicable.",
+            "status": "done",
+            "testStrategy": "Verify docker/mysql/my.cnf exists with correct slow_query_log settings. Restart mysql container and verify config applied via SHOW VARIABLES LIKE 'slow_query_log'. Test factories: User::factory()->create() returns valid user; Company::factory()->create() with user; Job::factory()->create() with company; Application::factory()->create() with job and user. Run make fresh to verify full migration and seeding works. Execute a slow query (SELECT SLEEP(1)) and verify it appears in slow query log.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T14:57:24.542Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T14:57:25.845Z"
+      },
+      {
+        "id": "4",
+        "title": "Models, Enums, and Eloquent Relationships",
+        "description": "Create all Eloquent models (User, Company, Job, Application) with relationships, casts, accessors, and PHP 8.3 backed enums for status fields. Implement toSearchArray() method on Job model for ES indexing.",
+        "details": "1. Create app/Enums/UserRole.php:\n```php\nnamespace App\\Enums;\n\nenum UserRole: string\n{\n    case Admin = 'admin';\n    case Company = 'company';\n    case Candidate = 'candidate';\n}\n```\n\n2. Create app/Enums/JobStatus.php:\n```php\nenum JobStatus: string\n{\n    case Draft = 'draft';\n    case Active = 'active';\n    case Closed = 'closed';\n}\n```\n\n3. Create app/Enums/EmploymentType.php and app/Enums/ApplicationStatus.php\n\n4. Create app/Models/User.php:\n```php\nclass User extends BaseModel implements JWTSubject\n{\n    protected $hidden = ['password', 'remember_token'];\n    protected function casts(): array\n    {\n        return [\n            'email_verified_at' => 'datetime',\n            'password' => 'hashed',\n            'role' => UserRole::class,\n        ];\n    }\n\n    public function company(): HasOne\n    {\n        return $this->hasOne(Company::class);\n    }\n\n    public function applications(): HasMany\n    {\n        return $this->hasMany(Application::class);\n    }\n\n    // JWTSubject methods\n    public function getJWTIdentifier(): mixed { return $this->getKey(); }\n    public function getJWTCustomClaims(): array { return ['roles' => [$this->role->value]]; }\n}\n```\n\n5. Create app/Models/Company.php:\n```php\nclass Company extends BaseModel\n{\n    protected function casts(): array\n    {\n        return ['is_verified' => 'boolean'];\n    }\n\n    public function user(): BelongsTo { return $this->belongsTo(User::class); }\n    public function jobs(): HasMany { return $this->hasMany(Job::class); }\n}\n```\n\n6. Create app/Models/Job.php with toSearchArray():\n```php\nclass Job extends BaseModel\n{\n    protected function casts(): array\n    {\n        return [\n            'status' => JobStatus::class,\n            'employment_type' => EmploymentType::class,\n            'is_remote' => 'boolean',\n            'published_at' => 'datetime',\n            'expires_at' => 'datetime',\n        ];\n    }\n\n    public function company(): BelongsTo { return $this->belongsTo(Company::class); }\n    public function applications(): HasMany { return $this->hasMany(Application::class); }\n\n    public function toSearchArray(): array\n    {\n        return [\n            'id' => $this->id,\n            'title' => $this->title,\n            'description' => $this->description,\n            'category' => $this->category,\n            'employment_type' => $this->employment_type->value,\n            'location_city' => $this->location_city,\n            'location_country' => $this->location_country,\n            'is_remote' => $this->is_remote,\n            'salary_min' => $this->salary_min,\n            'salary_max' => $this->salary_max,\n            'currency' => $this->currency,\n            'status' => $this->status->value,\n            'published_at' => $this->published_at?->toIso8601String(),\n            'company' => [\n                'id' => $this->company->id,\n                'name' => $this->company->name,\n                'industry' => $this->company->industry,\n            ],\n        ];\n    }\n}\n```\n\n7. Create app/Models/Application.php with casts and relationships\n\n8. Update factories with proper enum values",
+        "testStrategy": "- Unit test User::getJWTCustomClaims() returns role in claims\n- Unit test Job::toSearchArray() returns correct ES document structure with nested company\n- Test enum casting: create job with 'draft' string, retrieve as JobStatus::Draft\n- Test relationships: $company->jobs returns HasMany, $job->company returns BelongsTo\n- Test cascade: deleting company deletes all jobs\n- Test factory creates valid models with all required fields",
+        "priority": "high",
+        "dependencies": [
+          "2",
+          "3"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create PHP 8.3 Backed Enums for Status Fields",
+            "description": "Create all PHP 8.3 backed enums in app/Enums directory: UserRole (admin, company, candidate), JobStatus (draft, active, closed), EmploymentType (full_time, part_time, contract, internship), and ApplicationStatus (pending, reviewed, shortlisted, rejected).",
+            "dependencies": [],
+            "details": "Create the following enum files:\n\n1. app/Enums/UserRole.php with cases: Admin='admin', Company='company', Candidate='candidate'\n2. app/Enums/JobStatus.php with cases: Draft='draft', Active='active', Closed='closed'\n3. app/Enums/EmploymentType.php with cases: FullTime='full_time', PartTime='part_time', Contract='contract', Internship='internship'\n4. app/Enums/ApplicationStatus.php with cases: Pending='pending', Reviewed='reviewed', Shortlisted='shortlisted', Rejected='rejected'\n\nAll enums must be string-backed enums per PHP 8.3 syntax. These enums will be used in model casts and ensure type-safe status handling throughout the application. No hardcoded strings allowed in the codebase - always use enum cases like JobStatus::Active.",
+            "status": "done",
+            "testStrategy": "Unit tests to verify enum values match database column definitions. Test that each enum can be instantiated from its string value using ::from() and ::tryFrom() methods. Verify all expected cases exist on each enum.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:15:31.236Z"
+          },
+          {
+            "id": 2,
+            "title": "Create BaseModel and User Model with JWT Implementation",
+            "description": "Create app/Models/BaseModel.php as the base class for all models, then create app/Models/User.php implementing JWTSubject interface with proper casts for role enum, hidden attributes for password/remember_token, and relationships to Company and Application.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create app/Models/BaseModel.php extending Illuminate\\Database\\Eloquent\\Model with common configurations shared across all models.\n\n2. Create app/Models/User.php:\n- Extends BaseModel\n- Implements Tymon\\JWTAuth\\Contracts\\JWTSubject interface\n- Protected $hidden = ['password', 'remember_token']\n- Protected $fillable = ['name', 'email', 'password', 'role']\n- casts() method returning: 'email_verified_at' => 'datetime', 'password' => 'hashed', 'role' => UserRole::class\n- company(): HasOne relationship to Company model\n- applications(): HasMany relationship to Application model\n- getJWTIdentifier(): returns $this->getKey()\n- getJWTCustomClaims(): returns ['roles' => [$this->role->value]] with role in claims array\n\nImport all required classes at the top of the file.",
+            "status": "done",
+            "testStrategy": "Unit test getJWTIdentifier() returns the user primary key. Unit test getJWTCustomClaims() returns array with 'roles' key containing the user's role value. Test that role enum is properly cast when retrieved from database.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:15:32.741Z"
+          },
+          {
+            "id": 3,
+            "title": "Create Company and Application Models with Relationships",
+            "description": "Create app/Models/Company.php with user/jobs relationships and is_verified boolean cast. Create app/Models/Application.php with job/user relationships and casts for status enum and applied_at datetime.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "1. Create app/Models/Company.php:\n- Extends BaseModel\n- Protected $fillable = ['user_id', 'name', 'description', 'industry', 'city', 'country', 'website', 'is_verified']\n- casts() method returning: 'is_verified' => 'boolean'\n- user(): BelongsTo relationship to User model\n- jobs(): HasMany relationship to Job model\n\n2. Create app/Models/Application.php:\n- Extends BaseModel\n- Protected $fillable = ['job_id', 'user_id', 'cover_letter', 'status', 'applied_at']\n- casts() method returning: 'status' => ApplicationStatus::class, 'applied_at' => 'datetime'\n- job(): BelongsTo relationship to Job model\n- user(): BelongsTo relationship to User model\n- Note: updated_at is standard timestamp, no need for custom handling\n\nAll relationships use proper type hints with HasMany, BelongsTo return types.",
+            "status": "done",
+            "testStrategy": "Test Company::user() returns BelongsTo and Company::jobs() returns HasMany. Test Application::status cast from 'pending' string to ApplicationStatus::Pending enum. Test Application::applied_at cast to Carbon datetime instance.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:15:34.284Z"
+          },
+          {
+            "id": 4,
+            "title": "Create Job Model with toSearchArray() for Elasticsearch",
+            "description": "Create app/Models/Job.php with company/applications relationships, casts for status/employment_type enums and boolean/datetime fields, and implement toSearchArray() method that returns the exact document structure for Elasticsearch indexing including nested company object.",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "Create app/Models/Job.php:\n- Extends BaseModel\n- Protected $fillable = ['company_id', 'title', 'description', 'category', 'employment_type', 'location_city', 'location_country', 'is_remote', 'salary_min', 'salary_max', 'currency', 'status', 'published_at', 'expires_at']\n- casts() method returning: 'status' => JobStatus::class, 'employment_type' => EmploymentType::class, 'is_remote' => 'boolean', 'published_at' => 'datetime', 'expires_at' => 'datetime'\n- company(): BelongsTo relationship to Company model\n- applications(): HasMany relationship to Application model\n- toSearchArray(): array method returning ES document structure:\n  - 'id' => $this->id\n  - 'title', 'description', 'category' as strings\n  - 'employment_type' => $this->employment_type->value\n  - 'location_city', 'location_country', 'is_remote'\n  - 'salary_min', 'salary_max', 'currency'\n  - 'status' => $this->status->value\n  - 'published_at' => $this->published_at?->toIso8601String()\n  - 'company' => nested object with id, name, industry from $this->company",
+            "status": "done",
+            "testStrategy": "Unit test Job::toSearchArray() returns correct structure matching ES index mapping. Verify enum values are converted to strings. Test published_at null safety with ?-> operator. Test nested company object contains id, name, industry fields. Test $job->company returns BelongsTo relationship.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:15:35.846Z"
+          },
+          {
+            "id": 5,
+            "title": "Create Model Factories with Enum Values",
+            "description": "Create or update factories in database/factories for User, Company, Job, and Application models using proper enum values instead of hardcoded strings. Ensure factories use Faker for realistic test data generation.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Create the following factory files:\n\n1. database/factories/UserFactory.php:\n- name: $this->faker->name()\n- email: $this->faker->unique()->safeEmail()\n- password: Hash::make('password') or bcrypt('password')\n- role: UserRole::Candidate (default)\n- email_verified_at: now()\n- Add state methods: admin(), company(), candidate() that set appropriate role enum\n\n2. database/factories/CompanyFactory.php:\n- user_id: User::factory()\n- name: $this->faker->company()\n- description: $this->faker->paragraph()\n- industry: $this->faker->randomElement(['Technology', 'Finance', 'Healthcare', 'Retail'])\n- city: $this->faker->city()\n- country: 'ID'\n- website: $this->faker->url()\n- is_verified: false\n\n3. database/factories/JobFactory.php:\n- company_id: Company::factory()\n- title: $this->faker->jobTitle()\n- description: $this->faker->paragraphs(3, true)\n- category: $this->faker->randomElement(['Engineering', 'Marketing', 'Sales', 'Design'])\n- employment_type: EmploymentType::FullTime\n- location_city, location_country, is_remote, salary fields\n- status: JobStatus::Draft (default)\n- Add state methods: active(), closed(), draft()\n\n4. database/factories/ApplicationFactory.php:\n- job_id: Job::factory()\n- user_id: User::factory()->candidate()\n- cover_letter: $this->faker->paragraph()\n- status: ApplicationStatus::Pending\n- applied_at: now()",
+            "status": "done",
+            "testStrategy": "Test each factory creates valid model instances. Test factory state methods (e.g., UserFactory::new()->company() creates user with UserRole::Company). Test enum values are properly set on created models. Test relationships work (Job::factory()->create()->company returns Company instance).",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:15:37.312Z"
+          }
+        ],
+        "updatedAt": "2026-05-22T00:15:37.312Z"
+      },
+      {
+        "id": "5",
+        "title": "JWT Authentication System",
+        "description": "Implement complete JWT authentication with register, login, logout, refresh, forgot-password, and reset-password endpoints. Configure tymon/jwt-auth with HS256, proper claims (iss, sub, aud, jti, iat, exp, roles), and RequireRole middleware.",
+        "details": "1. Configure config/jwt.php:\n- algo: HS256 (never accept alg: none)\n- ttl: 60 (minutes)\n- refresh_ttl: 20160 (2 weeks)\n- required_claims: ['iss', 'sub', 'aud', 'jti', 'iat', 'exp']\n\n2. Generate JWT secret: `php artisan jwt:secret`\n\n3. Create app/Http/Requests/Auth/RegisterRequest.php:\n```php\nclass RegisterRequest extends FormRequest\n{\n    public function rules(): array\n    {\n        return [\n            'name' => ['required', 'string', 'max:255'],\n            'email' => ['required', 'email', 'unique:users,email'],\n            'password' => ['required', 'string', 'min:8', 'confirmed'],\n        ];\n    }\n}\n```\n\n4. Create LoginRequest, ForgotPasswordRequest, ResetPasswordRequest\n\n5. Create app/Actions/Auth/Register.php:\n```php\nclass Register extends BaseAction\n{\n    public function handle(RegisterRequest $request): JsonResponse\n    {\n        $user = User::create([\n            'name' => $request->name,\n            'email' => $request->email,\n            'password' => $request->password, // cast handles hashing\n            'role' => UserRole::Candidate,\n        ]);\n\n        $token = auth('api')->login($user);\n        return BaseResponse::created([\n            'user' => new UserResource($user),\n            'token' => $token,\n            'token_type' => 'bearer',\n            'expires_in' => config('jwt.ttl') * 60,\n        ]);\n    }\n}\n```\n\n6. Create Login action with credential validation\n7. Create Logout action invalidating token\n8. Create RefreshToken action using jwt.refresh middleware\n9. Create ForgotPassword action sending reset link via Password::sendResetLink()\n10. Create ResetPassword action using Password::reset()\n\n11. Create app/Http/Middleware/RequireRole.php:\n```php\nclass RequireRole\n{\n    public function handle(Request $request, Closure $next, string ...$roles): Response\n    {\n        $user = $request->user();\n        if (!$user || !in_array($user->role->value, $roles, true)) {\n            throw new ForbiddenException('Insufficient permissions');\n        }\n        return $next($request);\n    }\n}\n```\n\n12. Register middleware in bootstrap/app.php:\n```php\n->withMiddleware(function (Middleware $middleware) {\n    $middleware->alias(['role' => RequireRole::class]);\n})\n```\n\n13. Define routes in routes/api.php:\n```php\nRoute::prefix('v1/auth')->group(function () {\n    Route::post('register', Register::class);\n    Route::post('login', Login::class);\n    Route::post('forgot-password', ForgotPassword::class);\n    Route::post('reset-password', ResetPassword::class);\n\n    Route::middleware('auth:api')->group(function () {\n        Route::post('logout', Logout::class);\n        Route::post('refresh', RefreshToken::class)->middleware('jwt.refresh');\n    });\n});\n```\n\n14. Add WWW-Authenticate header for 401 responses in exception handler",
+        "testStrategy": "- Feature test POST /auth/register creates user, returns JWT with 201\n- Feature test POST /auth/register with duplicate email returns 409 Conflict\n- Feature test POST /auth/login with valid credentials returns JWT\n- Feature test POST /auth/login with wrong password returns 401 with WWW-Authenticate header\n- Feature test POST /auth/logout invalidates token, subsequent request returns 401\n- Feature test POST /auth/refresh returns new token\n- Feature test RequireRole middleware blocks candidate from company-only endpoints\n- Unit test User::getJWTCustomClaims() includes roles array\n- Verify JWT contains required claims: iss, sub, aud, jti, iat, exp, roles",
+        "priority": "high",
+        "dependencies": [
+          "4"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Install and Configure tymon/jwt-auth Package",
+            "description": "Install tymon/jwt-auth via Composer, publish config, configure config/jwt.php with HS256 algorithm, TTL settings, and required claims. Generate JWT secret and configure config/auth.php with API guard.",
+            "dependencies": [],
+            "details": "1. Run `composer require tymon/jwt-auth` to install the package.\n2. Publish config: `php artisan vendor:publish --provider=\"Tymon\\JWTAuth\\Providers\\LaravelServiceProvider\"`.\n3. Generate JWT secret: `php artisan jwt:secret`.\n4. Configure config/jwt.php:\n   - `'algo' => 'HS256'` (never accept alg: none)\n   - `'ttl' => 60` (minutes)\n   - `'refresh_ttl' => 20160` (2 weeks)\n   - `'required_claims' => ['iss', 'sub', 'aud', 'jti', 'iat', 'exp']`\n5. Update config/auth.php to add 'api' guard:\n   ```php\n   'guards' => [\n       'api' => [\n           'driver' => 'jwt',\n           'provider' => 'users',\n       ],\n   ],\n   ```\n6. Update User model to implement JWTSubject interface with getJWTIdentifier() and getJWTCustomClaims() methods (include roles in custom claims).\n7. Add role column to users table via migration and create UserRole enum.",
+            "status": "done",
+            "testStrategy": "Unit test config values are correctly set. Feature test that JWT tokens are generated with HS256 algorithm and contain required claims (iss, sub, aud, jti, iat, exp, roles). Verify JWT_SECRET is set in .env.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:26:55.292Z"
+          },
+          {
+            "id": 2,
+            "title": "Create Base Infrastructure Classes (BaseAction, BaseResponse, FormRequests)",
+            "description": "Create BaseAction class extending lorisleiva/laravel-actions, BaseResponse resource for standardized JSON responses, and Auth FormRequest classes (RegisterRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest).",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Install lorisleiva/laravel-actions: `composer require lorisleiva/laravel-actions`.\n2. Create app/Actions/BaseAction.php extending Lorisleiva\\Actions\\Concerns\\AsAction trait.\n3. Create app/Http/Resources/BaseResponse.php for standardized success responses with snake_case keys and RFC 3339 timestamps.\n4. Create app/Http/Requests/Auth/RegisterRequest.php with rules: name (required, string, max:255), email (required, email, unique:users), password (required, string, min:8, confirmed).\n5. Create app/Http/Requests/Auth/LoginRequest.php with rules: email (required, email), password (required, string).\n6. Create app/Http/Requests/Auth/ForgotPasswordRequest.php with rules: email (required, email, exists:users).\n7. Create app/Http/Requests/Auth/ResetPasswordRequest.php with rules: token (required), email (required, email, exists:users), password (required, string, min:8, confirmed).\n8. Ensure all FormRequests return validation errors in Problem Details format (application/problem+json).",
+            "status": "done",
+            "testStrategy": "Unit test each FormRequest validates correctly. Test RegisterRequest rejects duplicate emails. Test LoginRequest accepts valid credentials format. Test ResetPasswordRequest requires token and matching email. Verify BaseResponse formats data correctly with snake_case.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:26:56.663Z"
+          },
+          {
+            "id": 3,
+            "title": "Implement Auth Actions (Register, Login, Logout, RefreshToken)",
+            "description": "Create Auth actions for user registration, login with credential validation, logout with token invalidation, and token refresh functionality following the strict layering pattern with Actions delegating to services.",
+            "dependencies": [
+              2
+            ],
+            "details": "1. Create app/Actions/Auth/Register.php:\n   - Inject RegisterRequest, create user via service/repository pattern\n   - Assign UserRole::Candidate as default role\n   - Generate JWT token via auth('api')->login($user)\n   - Return BaseResponse::created with user, token, token_type, expires_in\n2. Create app/Actions/Auth/Login.php:\n   - Inject LoginRequest, validate credentials via auth('api')->attempt()\n   - Return 401 with WWW-Authenticate header on failure\n   - Return BaseResponse with token on success\n3. Create app/Actions/Auth/Logout.php:\n   - Requires auth:api middleware\n   - Invalidate token via auth('api')->logout()\n   - Return 204 No Content\n4. Create app/Actions/Auth/RefreshToken.php:\n   - Requires auth:api and jwt.refresh middleware\n   - Return new token via auth('api')->refresh()\n5. Create UserResource for user data serialization.\n6. Create app/Interfaces/UserRepositoryInterface.php and app/Repositories/UserRepository.php.\n7. Bind interface to implementation in AppServiceProvider.",
+            "status": "done",
+            "testStrategy": "Feature test POST /auth/register creates user and returns 201 with JWT. Feature test POST /auth/login with valid credentials returns JWT. Feature test POST /auth/login with wrong password returns 401 with WWW-Authenticate header. Feature test POST /auth/logout invalidates token. Feature test POST /auth/refresh returns new token.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:26:58.043Z"
+          },
+          {
+            "id": 4,
+            "title": "Implement Password Reset Actions (ForgotPassword, ResetPassword)",
+            "description": "Create ForgotPassword action using Password::sendResetLink() and ResetPassword action using Password::reset(). Configure mail for reset link delivery and handle throttling.",
+            "dependencies": [
+              2
+            ],
+            "details": "1. Create app/Actions/Auth/ForgotPassword.php:\n   - Inject ForgotPasswordRequest\n   - Call Password::sendResetLink(['email' => $request->email])\n   - Handle Password::RESET_LINK_SENT vs Password::RESET_THROTTLED\n   - Return 200 with success message (don't reveal if email exists for security)\n2. Create app/Actions/Auth/ResetPassword.php:\n   - Inject ResetPasswordRequest\n   - Call Password::reset() with credentials and password update callback\n   - Hash new password in callback\n   - Return 200 on success, 422 on invalid/expired token\n3. Ensure password_reset_tokens table migration exists (already present).\n4. Configure config/mail.php for password reset emails.\n5. Create password reset notification or use Laravel default.\n6. Handle edge cases: expired token, invalid token, email not found.",
+            "status": "done",
+            "testStrategy": "Feature test POST /auth/forgot-password sends reset email (mock Mail). Feature test POST /auth/forgot-password with non-existent email returns 200 (security - don't reveal). Feature test POST /auth/reset-password with valid token resets password. Feature test POST /auth/reset-password with expired/invalid token returns 422.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:26:59.330Z"
+          },
+          {
+            "id": 5,
+            "title": "Create RequireRole Middleware and Configure API Routes",
+            "description": "Implement RequireRole middleware for role-based access control, configure exception handler for 401 responses with WWW-Authenticate header, and define all auth routes in routes/api.php with proper middleware.",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "1. Create app/Http/Middleware/RequireRole.php:\n   - Accept variadic $roles parameter\n   - Check if authenticated user's role is in allowed roles\n   - Throw ForbiddenException (403) if not authorized\n2. Register middleware alias in bootstrap/app.php:\n   ```php\n   ->withMiddleware(function (Middleware $middleware) {\n       $middleware->alias(['role' => RequireRole::class]);\n   })\n   ```\n3. Configure exception handler in bootstrap/app.php withExceptions():\n   - Render AuthenticationException as 401 with WWW-Authenticate: Bearer header\n   - Render all errors in Problem Details format (application/problem+json)\n4. Create routes/api.php with v1/auth prefix:\n   - POST /register (public)\n   - POST /login (public)\n   - POST /forgot-password (public)\n   - POST /reset-password (public)\n   - POST /logout (auth:api)\n   - POST /refresh (auth:api, jwt.refresh)\n5. Update bootstrap/app.php to include api routes.\n6. Create app/Exceptions/ForbiddenException.php for 403 responses.",
+            "status": "done",
+            "testStrategy": "Feature test RequireRole middleware allows authorized roles. Feature test RequireRole middleware returns 403 for unauthorized roles. Feature test 401 responses include WWW-Authenticate: Bearer header. Feature test all auth routes are accessible at correct paths. Integration test full auth flow: register -> login -> refresh -> logout.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:27:00.627Z"
+          }
+        ],
+        "updatedAt": "2026-05-22T00:27:00.627Z"
+      },
+      {
+        "id": "6",
+        "title": "Companies CRUD with Repository Pattern",
+        "description": "Implement Companies module: CompanyRepository, CompanyService, all CRUD Actions (List, Get, Create, Update), FormRequests, and CompanyResource. Follow strict layering with interface bindings.",
+        "details": "1. Create app/Repositories/CompanyRepository.php implementing CompanyRepositoryInterface:\n```php\nclass CompanyRepository implements CompanyRepositoryInterface\n{\n    public function __construct(\n        private readonly Company $model\n    ) {}\n\n    public function findById(int $id): ?Company\n    {\n        return $this->model\n            ->select(['id', 'user_id', 'name', 'description', 'industry', 'city', 'country', 'website', 'is_verified', 'created_at'])\n            ->with('user:id,name,email')\n            ->find($id);\n    }\n\n    public function paginate(int $perPage = 15): LengthAwarePaginator\n    {\n        return QueryBuilder::for($this->model)\n            ->select(['id', 'user_id', 'name', 'industry', 'city', 'country', 'is_verified', 'created_at'])\n            ->allowedFilters(['industry', 'country', 'is_verified'])\n            ->allowedSorts(['name', 'created_at'])\n            ->with('user:id,name')\n            ->paginate($perPage);\n    }\n\n    public function create(array $data): Company { ... }\n    public function update(Company $company, array $data): Company { ... }\n}\n```\n\n2. Create app/Services/CompanyService.php implementing CompanyServiceInterface:\n```php\nclass CompanyService implements CompanyServiceInterface\n{\n    public function __construct(\n        private readonly CompanyRepositoryInterface $repository\n    ) {}\n\n    public function getById(int $id): Company\n    {\n        $company = $this->repository->findById($id);\n        if (!$company) {\n            throw new NotFoundException('Company not found');\n        }\n        return $company;\n    }\n\n    public function create(User $user, array $data): Company\n    {\n        if ($user->company) {\n            throw new ConflictException('User already has a company');\n        }\n        return $this->repository->create([...$data, 'user_id' => $user->id]);\n    }\n\n    public function update(Company $company, User $user, array $data): Company\n    {\n        if ($company->user_id !== $user->id && $user->role !== UserRole::Admin) {\n            throw new ForbiddenException('Cannot update another company');\n        }\n        return $this->repository->update($company, $data);\n    }\n}\n```\n\n3. Create FormRequests: CreateCompanyRequest, UpdateCompanyRequest\n\n4. Create app/Http/Resources/CompanyResource.php with snake_case keys, RFC 3339 timestamps\n\n5. Create Actions:\n- ListCompanies: returns PaginationResource wrapping paginated companies\n- GetCompany: returns CompanyResource via BaseResponse\n- CreateCompany: requires role:company middleware, calls service\n- UpdateCompany: requires role:company middleware, authorizes ownership\n\n6. Bind interfaces in AppServiceProvider:\n```php\npublic function register(): void\n{\n    $this->app->bind(CompanyRepositoryInterface::class, CompanyRepository::class);\n    $this->app->bind(CompanyServiceInterface::class, CompanyService::class);\n}\n```\n\n7. Define routes:\n```php\nRoute::prefix('v1/companies')->middleware('auth:api')->group(function () {\n    Route::get('/', ListCompanies::class);\n    Route::get('/{id}', GetCompany::class);\n    Route::post('/', CreateCompany::class)->middleware('role:company');\n    Route::patch('/{id}', UpdateCompany::class)->middleware('role:company');\n});\n```",
+        "testStrategy": "- Feature test GET /companies returns paginated list with meta\n- Feature test GET /companies?filter[industry]=tech filters correctly\n- Feature test GET /companies?sort=-created_at sorts descending\n- Feature test GET /companies/{id} returns single company with user relation\n- Feature test POST /companies creates company linked to authenticated user\n- Feature test POST /companies when user already has company returns 409\n- Feature test PATCH /companies/{id} by owner succeeds\n- Feature test PATCH /companies/{id} by non-owner returns 403\n- Unit test CompanyService::create() throws ConflictException for duplicate\n- Verify no SELECT * in repository queries via code review",
+        "priority": "high",
+        "dependencies": [
+          "5"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create CompanyRepositoryInterface and CompanyRepository",
+            "description": "Define the CompanyRepositoryInterface contract in app/Interfaces/ and implement CompanyRepository in app/Repositories/ with all required methods: findById, paginate, create, update. Use spatie/laravel-query-builder for pagination with allowed filters and sorts.",
+            "dependencies": [],
+            "details": "Create app/Interfaces/CompanyRepositoryInterface.php with method signatures: findById(int $id): ?Company, paginate(int $perPage = 15): LengthAwarePaginator, create(array $data): Company, update(Company $company, array $data): Company. Then implement app/Repositories/CompanyRepository.php using constructor injection of Company model. Use explicit column selection (no SELECT *): ['id', 'user_id', 'name', 'description', 'industry', 'city', 'country', 'website', 'is_verified', 'created_at']. Use QueryBuilder::for() in paginate() with allowedFilters(['industry', 'country', 'is_verified']) and allowedSorts(['name', 'created_at']). Include ->with('user:id,name,email') for eager loading to prevent N+1.",
+            "status": "done",
+            "testStrategy": "Unit test CompanyRepository methods in isolation. Test findById returns Company with user relation eager-loaded. Test paginate returns LengthAwarePaginator with correct filter and sort application. Test create persists data correctly. Test update modifies only provided fields.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:39:39.330Z"
+          },
+          {
+            "id": 2,
+            "title": "Create CompanyServiceInterface and CompanyService",
+            "description": "Define CompanyServiceInterface contract and implement CompanyService with business logic for getById, create, and update operations. Include ownership validation, duplicate company prevention, and proper exception throwing.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Interfaces/CompanyServiceInterface.php with methods: getById(int $id): Company, getAll(int $perPage = 15): LengthAwarePaginator, create(User $user, array $data): Company, update(Company $company, User $user, array $data): Company. Implement app/Services/CompanyService.php with constructor injection of CompanyRepositoryInterface. In getById(), throw NotFoundException if company not found. In create(), check $user->company relationship - if exists throw ConflictException('User already has a company'). Merge user_id into data array. In update(), validate ownership: throw ForbiddenException if $company->user_id !== $user->id and user role is not Admin.",
+            "status": "done",
+            "testStrategy": "Unit test CompanyService with mocked CompanyRepositoryInterface. Test getById throws NotFoundException for non-existent company. Test create throws ConflictException when user already has company. Test update throws ForbiddenException for non-owner non-admin. Test successful create/update flows.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:39:40.578Z"
+          },
+          {
+            "id": 3,
+            "title": "Create FormRequests and CompanyResource",
+            "description": "Create CreateCompanyRequest and UpdateCompanyRequest FormRequest classes with validation rules. Create CompanyResource JSON resource with snake_case keys and RFC 3339 timestamps.",
+            "dependencies": [],
+            "details": "Create app/Http/Requests/CreateCompanyRequest.php with rules: name (required, string, max:255), description (required, string), industry (required, string, max:100), city (required, string, max:100), country (required, string, max:100), website (nullable, url, max:255). Create UpdateCompanyRequest.php with same rules but all 'sometimes' instead of 'required'. Create app/Http/Resources/CompanyResource.php extending JsonResource with toArray() returning: id, user_id, name, description, industry, city, country, website, is_verified (boolean), created_at (RFC 3339 via toIso8601String()), updated_at (RFC 3339), and conditionally loaded 'user' relation using whenLoaded().",
+            "status": "done",
+            "testStrategy": "Unit test CreateCompanyRequest validation rules - test required fields fail when missing, url validation on website, max length constraints. Unit test UpdateCompanyRequest allows partial updates. Unit test CompanyResource output structure has snake_case keys and ISO 8601 timestamps.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:39:41.842Z"
+          },
+          {
+            "id": 4,
+            "title": "Create Company CRUD Actions using lorisleiva/laravel-actions",
+            "description": "Implement four Action classes: ListCompaniesAction, GetCompanyAction, CreateCompanyAction, and UpdateCompanyAction. Each extends BaseAction and follows single-responsibility principle with proper dependency injection.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Create app/Actions/Company/ListCompaniesAction.php: inject CompanyServiceInterface, call getAll() in handle(), return PaginationResource wrapping result via BaseResponse::success(). Create GetCompanyAction.php: accept $id parameter, call service->getById($id), return CompanyResource via BaseResponse::success(). Create CreateCompanyAction.php: type-hint CreateCompanyRequest for validation, get authenticated user via auth()->user(), call service->create($user, $request->validated()), return CompanyResource via BaseResponse::created(). Create UpdateCompanyAction.php: accept $id and UpdateCompanyRequest, fetch company via service, call service->update($company, $user, $request->validated()), return CompanyResource via BaseResponse::success().",
+            "status": "done",
+            "testStrategy": "Feature test ListCompaniesAction returns paginated response with correct meta structure. Feature test GetCompanyAction returns single company with user relation. Feature test CreateCompanyAction creates company for authenticated company-role user. Feature test UpdateCompanyAction allows owner to update, returns 403 for non-owner.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:39:43.098Z"
+          },
+          {
+            "id": 5,
+            "title": "Bind interfaces in AppServiceProvider and define API routes",
+            "description": "Register interface-to-implementation bindings in AppServiceProvider. Configure API routes in bootstrap/app.php or routes/api.php with proper middleware (auth:api, role:company) for the Companies endpoints.",
+            "dependencies": [
+              1,
+              2,
+              4
+            ],
+            "details": "Update app/Providers/AppServiceProvider.php register() method to add bindings: $this->app->bind(CompanyRepositoryInterface::class, CompanyRepository::class) and $this->app->bind(CompanyServiceInterface::class, CompanyService::class). Add necessary use statements at top of file. Create routes/api.php if not exists, or add to existing. Define route group: Route::prefix('v1/companies')->middleware('auth:api')->group(function() { Route::get('/', ListCompaniesAction::class); Route::get('/{id}', GetCompanyAction::class)->whereNumber('id'); Route::post('/', CreateCompanyAction::class)->middleware('role:company'); Route::patch('/{id}', UpdateCompanyAction::class)->whereNumber('id')->middleware('role:company'); }). Update bootstrap/app.php to include api routes if using Laravel 13 routing configuration.",
+            "status": "done",
+            "testStrategy": "Feature test route GET /api/v1/companies returns paginated list. Feature test GET /api/v1/companies?filter[industry]=tech filters correctly. Feature test POST /api/v1/companies requires auth and role:company middleware. Feature test PATCH /api/v1/companies/{id} requires auth and role:company middleware. Test 401 for unauthenticated requests.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-22T00:39:44.382Z"
+          }
+        ],
+        "updatedAt": "2026-05-22T00:39:44.382Z"
+      },
+      {
+        "id": "7",
+        "title": "Jobs CRUD with MySQL and Redis Pub/Sub Publishing",
+        "description": "Implement Jobs module: JobRepository, JobService with Redis pub/sub publishing on create/update/delete, all CRUD Actions, FormRequests, and JobResource. This is MySQL-only initially; ES search comes later.",
+        "details": "1. Create app/Repositories/JobRepository.php implementing JobRepositoryInterface:\n```php\nclass JobRepository implements JobRepositoryInterface\n{\n    public function findById(int $id): ?Job\n    {\n        return Job::select(['id', 'company_id', 'title', 'description', 'category', 'employment_type', 'location_city', 'location_country', 'is_remote', 'salary_min', 'salary_max', 'currency', 'status', 'published_at', 'expires_at', 'created_at', 'updated_at'])\n            ->with('company:id,name,industry')\n            ->find($id);\n    }\n\n    public function findByCompanyId(int $companyId, int $perPage = 15): LengthAwarePaginator\n    {\n        return QueryBuilder::for(Job::class)\n            ->select([...])\n            ->where('company_id', $companyId)\n            ->allowedFilters(['status', 'category'])\n            ->allowedSorts(['created_at', 'published_at', 'title'])\n            ->paginate($perPage);\n    }\n\n    public function create(array $data): Job { ... }\n    public function update(Job $job, array $data): Job { ... }\n    public function delete(Job $job): void { $job->delete(); }\n}\n```\n\n2. Create app/Services/JobService.php with Redis publishing:\n```php\nclass JobService implements JobServiceInterface\n{\n    public function __construct(\n        private readonly JobRepositoryInterface $repository\n    ) {}\n\n    public function create(Company $company, array $data): Job\n    {\n        $job = $this->repository->create([...$data, 'company_id' => $company->id]);\n        $job->load('company:id,name,industry');\n        $this->publishToIndex($job);\n        return $job;\n    }\n\n    public function update(Job $job, array $data): Job\n    {\n        $job = $this->repository->update($job, $data);\n        $job->load('company:id,name,industry');\n        $this->publishToIndex($job);\n        return $job;\n    }\n\n    public function delete(Job $job): void\n    {\n        $jobId = $job->id;\n        $this->repository->delete($job);\n        $this->publishToDelete($jobId);\n    }\n\n    private function publishToIndex(Job $job): void\n    {\n        try {\n            Redis::publish('jobs:index', json_encode($job->toSearchArray()));\n        } catch (\\Throwable) {\n            // Redis unavailable - job saved to MySQL, ES becomes stale (Phase 1 behavior)\n        }\n    }\n\n    private function publishToDelete(int $jobId): void\n    {\n        try {\n            Redis::publish('jobs:delete', json_encode(['id' => $jobId]));\n        } catch (\\Throwable) {\n            // Redis unavailable - handled gracefully\n        }\n    }\n}\n```\n\n3. Create FormRequests: CreateJobRequest (validates all fields, category required, employment_type enum validation), UpdateJobRequest\n\n4. Create app/Http/Resources/JobResource.php with nested CompanyResource\n\n5. Create Actions:\n- ListJobs: paginated MySQL list for company dashboard (uses JobRepository::findByCompanyId)\n- GetJob: public, returns single job from MySQL\n- CreateJob: requires role:company, validates company ownership\n- UpdateJob: requires role:company, checks ownership (or admin)\n- DeleteJob: requires role:company, checks ownership\n\n6. Define routes:\n```php\nRoute::prefix('v1/jobs')->group(function () {\n    Route::get('/{id}', GetJob::class); // public\n\n    Route::middleware(['auth:api', 'role:company'])->group(function () {\n        Route::post('/', CreateJob::class);\n        Route::patch('/{id}', UpdateJob::class);\n        Route::delete('/{id}', DeleteJob::class);\n    });\n});\n```\n\n7. Add company-owned jobs list route:\n```php\nRoute::get('/v1/companies/{id}/jobs', ListJobs::class)->middleware('auth:api');\n```",
+        "testStrategy": "- Feature test POST /jobs creates job in MySQL and returns 201\n- Feature test POST /jobs publishes to Redis 'jobs:index' channel (mock Redis::publish)\n- Feature test PATCH /jobs/{id} updates job and re-publishes to Redis\n- Feature test DELETE /jobs/{id} removes from MySQL and publishes to 'jobs:delete'\n- Feature test company can only CRUD their own jobs (403 for other company's job)\n- Feature test admin can update/delete any job\n- Feature test GET /jobs/{id} returns job with nested company\n- Unit test JobService::create() calls repository and publishes event\n- Unit test JobService handles Redis failure gracefully (no exception thrown)\n- Verify EXPLAIN on findByCompanyId uses idx_company_status index",
+        "priority": "high",
+        "dependencies": [
+          "6"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create JobRepositoryInterface and JobRepository with QueryBuilder",
+            "description": "Implement the Job repository layer following the strict architecture pattern with interface binding. Create JobRepositoryInterface in app/Interfaces/ and JobRepository in app/Repositories/ implementing findById, findByCompanyId (with spatie/laravel-query-builder pagination, filtering, sorting), create, update, and delete methods. Bind interface to implementation in AppServiceProvider.",
+            "dependencies": [],
+            "details": "Create app/Interfaces/JobRepositoryInterface.php defining: findById(int $id): ?Job, findByCompanyId(int $companyId, int $perPage): LengthAwarePaginator, create(array $data): Job, update(Job $job, array $data): Job, delete(Job $job): void. Create app/Repositories/JobRepository.php implementing the interface. findById must select explicit columns (never SELECT *): id, company_id, title, description, category, employment_type, location_city, location_country, is_remote, salary_min, salary_max, currency, status, published_at, expires_at, created_at, updated_at with eager-loaded company:id,name,industry. findByCompanyId must use QueryBuilder::for(Job::class) with allowedFilters(['status', 'category']) and allowedSorts(['created_at', 'published_at', 'title']). Register binding in AppServiceProvider::register(): $this->app->bind(JobRepositoryInterface::class, JobRepository::class).",
+            "status": "pending",
+            "testStrategy": "Unit test JobRepository methods in isolation. Test findById returns Job with company relation. Test findByCompanyId returns LengthAwarePaginator with correct filtering and sorting. Test create/update return Job instances. Test delete removes record. Integration test to verify EXPLAIN type is not ALL for queries on jobs table.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Create JobServiceInterface and JobService with Redis Pub/Sub",
+            "description": "Implement the Job service layer with business logic and Redis pub/sub publishing. Create JobServiceInterface in app/Interfaces/ and JobService in app/Services/ that orchestrates JobRepository and publishes to Redis channels 'jobs:index' and 'jobs:delete' on create/update/delete operations.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Interfaces/JobServiceInterface.php defining: create(Company $company, array $data): Job, update(Job $job, array $data): Job, delete(Job $job): void. Create app/Services/JobService.php implementing the interface. Constructor injects JobRepositoryInterface via DI. create() method: calls repository->create with data + company_id, loads company relation, calls publishToIndex(). update() method: calls repository->update, loads company relation, calls publishToIndex(). delete() method: captures job id, calls repository->delete, calls publishToDelete(). Private publishToIndex(Job $job): void uses Redis::publish('jobs:index', json_encode($job->toSearchArray())) wrapped in try/catch (silent fail for Phase 1). Private publishToDelete(int $jobId): void uses Redis::publish('jobs:delete', json_encode(['id' => $jobId])) wrapped in try/catch. Register binding in AppServiceProvider.",
+            "status": "pending",
+            "testStrategy": "Unit test JobService with mocked JobRepositoryInterface. Test create() publishes to 'jobs:index' channel with correct payload using Redis::shouldReceive(). Test update() publishes to 'jobs:index' channel. Test delete() publishes to 'jobs:delete' channel with job ID. Test Redis failure is caught silently (no exception bubbles).",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create CreateJobRequest, UpdateJobRequest FormRequests and JobResource",
+            "description": "Implement form request validation for job creation and update operations, plus JobResource for API responses. FormRequests handle validation only (no business logic). JobResource wraps Job model with nested CompanyResource for API output.",
+            "dependencies": [],
+            "details": "Create app/Http/Requests/CreateJobRequest.php with rules: title (required|string|max:255), description (required|string), category (required|string|max:100), employment_type (required|in:full_time,part_time,contract,internship), location_city (nullable|string|max:100), location_country (required|string|max:100|default:ID), is_remote (boolean), salary_min (nullable|integer|min:0), salary_max (nullable|integer|gte:salary_min), currency (required|string|size:3|default:IDR), status (in:draft,active,closed), published_at (nullable|date), expires_at (nullable|date|after:now). Create app/Http/Requests/UpdateJobRequest.php with same rules but all fields nullable for partial updates. Create app/Http/Resources/JobResource.php returning: id, company_id, title, description, category, employment_type, location_city, location_country, is_remote, salary_min, salary_max, currency, status, published_at (ISO 8601 with Z suffix), expires_at, created_at, updated_at, and nested company via CompanyResource (whenLoaded).",
+            "status": "pending",
+            "testStrategy": "Unit test CreateJobRequest validation rules: test required fields fail validation when missing, test employment_type enum validation, test salary_max gte salary_min. Unit test UpdateJobRequest allows partial updates. Unit test JobResource transforms Job model correctly with snake_case keys and ISO 8601 timestamps.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Create Job CRUD Actions using lorisleiva/laravel-actions",
+            "description": "Implement all Job CRUD actions following the single use-case pattern: ListJobs, GetJob, CreateJob, UpdateJob, DeleteJob. Actions extend BaseAction, inject services via constructor, handle authorization checks, and return BaseResponse-wrapped resources.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Create app/Actions/Jobs/ListJobs.php: asController method receives company id, uses JobRepository::findByCompanyId(), returns PaginationResource wrapped in BaseResponse. Create app/Actions/Jobs/GetJob.php: asController receives job id, uses JobRepository::findById(), returns JobResource in BaseResponse (public endpoint). Create app/Actions/Jobs/CreateJob.php: asController receives CreateJobRequest, requires auth:api middleware and role:company, gets authenticated user's company, uses JobService::create(), returns JobResource with 201 status. Create app/Actions/Jobs/UpdateJob.php: asController receives job id and UpdateJobRequest, requires auth:api and role:company, checks ownership (job->company_id matches user's company_id or user is admin), uses JobService::update(), returns JobResource. Create app/Actions/Jobs/DeleteJob.php: asController receives job id, requires auth:api and role:company, checks ownership, uses JobService::delete(), returns 204 No Content.",
+            "status": "pending",
+            "testStrategy": "Feature test POST /v1/jobs creates job in MySQL and returns 201 with JobResource. Feature test GET /v1/jobs/{id} returns single job (public). Feature test PATCH /v1/jobs/{id} updates job and returns 200. Feature test DELETE /v1/jobs/{id} returns 204. Feature test company cannot update/delete another company's job (returns 403). Feature test unauthenticated request to protected endpoints returns 401.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Define API routes for Jobs CRUD endpoints",
+            "description": "Create routes/api.php if not exists and define all Job-related routes with proper middleware groups. Configure bootstrap/app.php to load API routes. Routes follow RESTful conventions with v1 prefix.",
+            "dependencies": [
+              4
+            ],
+            "details": "Create routes/api.php with Route facade. Define routes under prefix 'v1': GET /v1/jobs/{id} → GetJob::class (public, no auth). Protected routes with middleware(['auth:api', 'role:company']): POST /v1/jobs → CreateJob::class, PATCH /v1/jobs/{id} → UpdateJob::class, DELETE /v1/jobs/{id} → DeleteJob::class. Add company-scoped route: GET /v1/companies/{id}/jobs → ListJobs::class with middleware('auth:api'). Update bootstrap/app.php withRouting() to include api: __DIR__.'/../routes/api.php' with prefix 'api'. Ensure all routes return JSON (Accept: application/json header handled by Laravel). Verify routes with php artisan route:list.",
+            "status": "pending",
+            "testStrategy": "Feature test all endpoints are accessible at correct paths. Test GET /api/v1/jobs/{id} returns 200 for valid job. Test POST /api/v1/jobs returns 401 without token. Test POST /api/v1/jobs returns 403 for non-company role. Test GET /api/v1/companies/{id}/jobs returns paginated jobs list. Verify route:list shows all 5 endpoints with correct middleware.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T01:48:04.073Z"
+      },
+      {
+        "id": "8",
+        "title": "Applications Module: Apply, List, Withdraw",
+        "description": "Implement Applications module: ApplicationRepository, ApplicationService, Actions for applying to jobs, listing user's applications, withdrawing applications, and listing applications for a job (company view). Prevent duplicate applications with 409 Conflict.",
+        "details": "1. Create app/Repositories/ApplicationRepository.php:\n```php\nclass ApplicationRepository implements ApplicationRepositoryInterface\n{\n    public function findById(int $id): ?Application\n    {\n        return Application::select(['id', 'job_id', 'user_id', 'cover_letter', 'status', 'applied_at', 'updated_at'])\n            ->with(['job:id,title,company_id', 'job.company:id,name'])\n            ->find($id);\n    }\n\n    public function findByUserAndJob(int $userId, int $jobId): ?Application\n    {\n        return Application::where('user_id', $userId)\n            ->where('job_id', $jobId)\n            ->first();\n    }\n\n    public function findByUserId(int $userId, int $perPage = 15): LengthAwarePaginator\n    {\n        return QueryBuilder::for(Application::class)\n            ->select(['id', 'job_id', 'user_id', 'status', 'applied_at'])\n            ->where('user_id', $userId)\n            ->allowedFilters(['status'])\n            ->allowedSorts(['applied_at', 'status'])\n            ->with(['job:id,title,company_id', 'job.company:id,name'])\n            ->paginate($perPage);\n    }\n\n    public function findByJobId(int $jobId, int $perPage = 15): LengthAwarePaginator\n    {\n        return QueryBuilder::for(Application::class)\n            ->select(['id', 'job_id', 'user_id', 'cover_letter', 'status', 'applied_at'])\n            ->where('job_id', $jobId)\n            ->allowedFilters(['status'])\n            ->allowedSorts(['applied_at', 'status'])\n            ->with('user:id,name,email')\n            ->paginate($perPage);\n    }\n\n    public function create(array $data): Application { ... }\n    public function delete(Application $application): void { $application->delete(); }\n}\n```\n\n2. Create app/Services/ApplicationService.php:\n```php\nclass ApplicationService implements ApplicationServiceInterface\n{\n    public function apply(User $user, Job $job, ?string $coverLetter): Application\n    {\n        if ($user->role !== UserRole::Candidate) {\n            throw new ForbiddenException('Only candidates can apply to jobs');\n        }\n\n        if ($job->status !== JobStatus::Active) {\n            throw new ForbiddenException('Cannot apply to inactive job');\n        }\n\n        $existing = $this->repository->findByUserAndJob($user->id, $job->id);\n        if ($existing) {\n            throw new ConflictException('Already applied to this job');\n        }\n\n        return $this->repository->create([\n            'user_id' => $user->id,\n            'job_id' => $job->id,\n            'cover_letter' => $coverLetter,\n        ]);\n    }\n\n    public function withdraw(Application $application, User $user): void\n    {\n        if ($application->user_id !== $user->id) {\n            throw new ForbiddenException('Cannot withdraw another user\\'s application');\n        }\n        $this->repository->delete($application);\n    }\n}\n```\n\n3. Create FormRequests: ApplyToJobRequest (cover_letter optional, max:5000)\n\n4. Create app/Http/Resources/ApplicationResource.php\n\n5. Create Actions:\n- ApplyToJob: POST /jobs/{id}/apply, requires role:candidate\n- ListMyApplications: GET /me/applications, requires auth\n- WithdrawApplication: DELETE /applications/{id}, requires ownership\n- ListJobApplications: GET /jobs/{id}/applications, requires role:company and job ownership\n\n6. Define routes:\n```php\nRoute::middleware('auth:api')->group(function () {\n    Route::post('/v1/jobs/{id}/apply', ApplyToJob::class)->middleware('role:candidate');\n    Route::get('/v1/me/applications', ListMyApplications::class);\n    Route::delete('/v1/applications/{id}', WithdrawApplication::class);\n    Route::get('/v1/jobs/{id}/applications', ListJobApplications::class)->middleware('role:company');\n});\n```",
+        "testStrategy": "- Feature test POST /jobs/{id}/apply creates application with 201\n- Feature test POST /jobs/{id}/apply duplicate returns 409 Conflict\n- Feature test POST /jobs/{id}/apply to inactive job returns 403\n- Feature test candidate cannot apply as company role\n- Feature test GET /me/applications returns only authenticated user's applications\n- Feature test DELETE /applications/{id} by owner succeeds\n- Feature test DELETE /applications/{id} by non-owner returns 403\n- Feature test GET /jobs/{id}/applications returns applications for company's job\n- Feature test GET /jobs/{id}/applications on another company's job returns 403\n- Verify EXPLAIN on findByUserId uses idx_user_status index",
+        "priority": "medium",
+        "dependencies": [
+          "7"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create ApplicationRepository implementing ApplicationRepositoryInterface",
+            "description": "Implement ApplicationRepository with all data access methods using QueryBuilder for pagination with explicit column selection and eager loading",
+            "dependencies": [],
+            "details": "Create app/Repositories/ApplicationRepository.php implementing ApplicationRepositoryInterface. Methods: findById() with select(['id', 'job_id', 'user_id', 'cover_letter', 'status', 'applied_at', 'updated_at']) and with(['job:id,title,company_id', 'job.company:id,name']). findByUserId() using QueryBuilder::for() with allowedFilters(['status']), allowedSorts(['applied_at', 'status']), eager load job and company. findByJobId() using QueryBuilder with allowedFilters(['status']), allowedSorts(['applied_at', 'status']), eager load user:id,name,email. existsByJobAndUser() returning bool. create() accepting array data. delete() accepting int id. Register binding in AppServiceProvider: $this->app->bind(ApplicationRepositoryInterface::class, ApplicationRepository::class).",
+            "status": "pending",
+            "testStrategy": "Unit test each repository method. Test findById returns Application with relationships loaded. Test findByUserId/findByJobId return LengthAwarePaginator with correct filtering and sorting. Test existsByJobAndUser returns true/false correctly. Test create persists data. Test delete removes record.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Create ApplicationService implementing ApplicationServiceInterface with business logic",
+            "description": "Implement ApplicationService with apply logic including duplicate prevention (409), job status validation, role validation, and withdraw with ownership check",
+            "dependencies": [
+              1
+            ],
+            "details": "Create app/Services/ApplicationService.php implementing ApplicationServiceInterface. Inject ApplicationRepositoryInterface and JobRepositoryInterface via constructor. apply() method: validate user has candidate role (throw ForbiddenException), validate job status is active (throw ForbiddenException), check existsByJobAndUser (throw ConflictException if true), call repository create with user_id, job_id, cover_letter, status='pending', applied_at=now(). getById(): call repository findById, throw NotFoundException if null. listByJob()/listByUser(): delegate to repository. delete(): get application by id, validate ownership (user_id matches), throw ForbiddenException if not owner, then call repository delete. Register binding in AppServiceProvider.",
+            "status": "pending",
+            "testStrategy": "Unit test apply() creates application successfully. Test apply() throws ConflictException on duplicate. Test apply() throws ForbiddenException for non-candidate. Test apply() throws ForbiddenException for inactive job. Test delete() throws ForbiddenException when user doesn't own application. Test getById() throws NotFoundException for missing application.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create ApplyToJobRequest and ApplicationResource",
+            "description": "Create FormRequest for job application validation and API Resource for consistent application response formatting",
+            "dependencies": [],
+            "details": "Create app/Http/Requests/ApplyToJobRequest.php extending FormRequest. Rules: 'cover_letter' => ['nullable', 'string', 'max:5000']. authorize() returns true (auth handled by middleware). Create app/Http/Resources/ApplicationResource.php extending JsonResource. toArray() returns: id, job_id, user_id, cover_letter (when loaded), status, applied_at (RFC 3339 format with Z suffix), job (nested with id, title, company when loaded), user (nested with id, name, email when loaded). Follow existing BaseResponse pattern for consistency.",
+            "status": "pending",
+            "testStrategy": "Unit test ApplyToJobRequest validation: cover_letter accepts null, accepts string up to 5000 chars, rejects strings over 5000 chars. Unit test ApplicationResource transforms Application model correctly with all fields in snake_case, timestamps in RFC 3339 format.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Create Application Actions: ApplyToJob, ListMyApplications, WithdrawApplication, ListJobApplications",
+            "description": "Implement four Action classes using lorisleiva/laravel-actions pattern for each application endpoint",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Create app/Actions/Application/ApplyToJob.php extending BaseAction. Inject ApplicationServiceInterface. asController() receives ApplyToJobRequest and job id, calls service apply() with auth user, job, cover_letter from request, returns BaseResponse::created() with ApplicationResource. Create app/Actions/Application/ListMyApplications.php - inject service, call listByUser(auth()->id()), return PaginationResource::make() with ApplicationResource::collection(). Create app/Actions/Application/WithdrawApplication.php - inject service, call delete() with application id and auth user, return BaseResponse::noContent(). Create app/Actions/Application/ListJobApplications.php - inject service and JobServiceInterface, verify job ownership (job.company_id === auth user's company_id, throw ForbiddenException if not), call listByJob(), return PaginationResource.",
+            "status": "pending",
+            "testStrategy": "Feature test ApplyToJob returns 201 with application data. Feature test ListMyApplications returns paginated list. Feature test WithdrawApplication returns 204 on success. Feature test ListJobApplications returns paginated applications for company's job. Test each action uses correct HTTP status codes.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Define API routes and write feature tests for Applications module",
+            "description": "Create routes/api.php with application routes including auth middleware and role restrictions, then write comprehensive feature tests",
+            "dependencies": [
+              4
+            ],
+            "details": "Create routes/api.php (if not exists) with: Route::middleware('auth:api')->group() containing POST /v1/jobs/{id}/apply using ApplyToJob::class with middleware('role:candidate'), GET /v1/me/applications using ListMyApplications::class, DELETE /v1/applications/{id} using WithdrawApplication::class, GET /v1/jobs/{id}/applications using ListJobApplications::class with middleware('role:company'). Register api routes in bootstrap/app.php or RouteServiceProvider. Write tests/Feature/ApplicationTest.php: test_apply_to_job_creates_application_returns_201, test_apply_to_job_duplicate_returns_409_conflict, test_apply_to_inactive_job_returns_403, test_company_user_cannot_apply_returns_403, test_list_my_applications_returns_paginated_results, test_withdraw_application_returns_204, test_cannot_withdraw_another_users_application_returns_403, test_list_job_applications_returns_paginated_results, test_cannot_list_applications_for_other_companys_job_returns_403.",
+            "status": "pending",
+            "testStrategy": "Feature tests covering all endpoints with success and error scenarios. Test 201 for successful apply, 409 for duplicate, 403 for wrong role/inactive job/ownership violations, 204 for successful withdraw. Test pagination meta fields. Test response structure matches BaseResponse format.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T01:57:56.480Z"
+      },
+      {
+        "id": "9",
+        "title": "Me Endpoint and User Profile",
+        "description": "Implement Me module: GetMe action returning authenticated user profile, UpdateProfile action allowing name and password changes. Configure route at /api/v1/me.",
+        "details": "1. Create app/Http/Resources/UserResource.php:\n```php\nclass UserResource extends JsonResource\n{\n    public function toArray(Request $request): array\n    {\n        return [\n            'id' => $this->id,\n            'name' => $this->name,\n            'email' => $this->email,\n            'role' => $this->role->value,\n            'email_verified_at' => $this->email_verified_at?->toIso8601String(),\n            'created_at' => $this->created_at->toIso8601String(),\n            'company' => $this->when(\n                $this->role === UserRole::Company && $this->relationLoaded('company'),\n                fn() => new CompanyResource($this->company)\n            ),\n        ];\n    }\n}\n```\n\n2. Create app/Actions/Me/GetMe.php:\n```php\nclass GetMe extends BaseAction\n{\n    public function handle(Request $request): JsonResponse\n    {\n        $user = $request->user();\n        if ($user->role === UserRole::Company) {\n            $user->load('company');\n        }\n        return BaseResponse::success(new UserResource($user));\n    }\n}\n```\n\n3. Create app/Http/Requests/UpdateProfileRequest.php:\n```php\nclass UpdateProfileRequest extends FormRequest\n{\n    public function rules(): array\n    {\n        return [\n            'name' => ['sometimes', 'string', 'max:255'],\n            'current_password' => ['required_with:password', 'current_password:api'],\n            'password' => ['sometimes', 'string', 'min:8', 'confirmed'],\n        ];\n    }\n}\n```\n\n4. Create app/Actions/Me/UpdateProfile.php:\n```php\nclass UpdateProfile extends BaseAction\n{\n    public function handle(UpdateProfileRequest $request): JsonResponse\n    {\n        $user = $request->user();\n        $data = $request->validated();\n\n        if (isset($data['name'])) {\n            $user->name = $data['name'];\n        }\n\n        if (isset($data['password'])) {\n            $user->password = $data['password'];\n        }\n\n        $user->save();\n\n        if ($user->role === UserRole::Company) {\n            $user->load('company');\n        }\n\n        return BaseResponse::success(new UserResource($user));\n    }\n}\n```\n\n5. Define routes:\n```php\nRoute::prefix('v1/me')->middleware('auth:api')->group(function () {\n    Route::get('/', GetMe::class);\n    Route::patch('/', UpdateProfile::class);\n});\n```",
+        "testStrategy": "- Feature test GET /me returns authenticated user profile with role\n- Feature test GET /me for company user includes company relation\n- Feature test GET /me for candidate user does not include company\n- Feature test PATCH /me updates name successfully\n- Feature test PATCH /me with password requires current_password\n- Feature test PATCH /me with wrong current_password returns 422\n- Feature test unauthenticated request to /me returns 401 with WWW-Authenticate",
+        "priority": "medium",
+        "dependencies": [
+          "5"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create UserResource for API response formatting",
+            "description": "Create app/Http/Resources/UserResource.php extending JsonResource to transform User model data for API responses. Include conditional company relation loading based on user role.",
+            "dependencies": [],
+            "details": "Create UserResource extending Illuminate\\Http\\Resources\\Json\\JsonResource with toArray() method. Return id, name, email, role (using ->value from UserRole enum), email_verified_at (ISO8601 format using toIso8601String()), created_at (ISO8601). Use $this->when() to conditionally include company relation only when role is UserRole::Company and relation is loaded. This requires UserRole enum and CompanyResource to exist from Task 4 and Task 6 dependencies.",
+            "status": "pending",
+            "testStrategy": "Unit test UserResource transforms User model correctly with all fields. Test that company is included only for company role users with loaded relation. Test ISO8601 date formatting for timestamps.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Create GetMe action returning authenticated user profile",
+            "description": "Create app/Actions/Me/GetMe.php extending BaseAction to handle GET /api/v1/me endpoint. Return authenticated user profile with conditional company relation loading.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create GetMe action class in app/Actions/Me/ directory extending BaseAction. Implement handle(Request $request) method that gets authenticated user via $request->user(). Check if user role is UserRole::Company and eager load company relation using ->load('company'). Return BaseResponse::success() with UserResource wrapping the user. The action handles HTTP layer only, no business logic.",
+            "status": "pending",
+            "testStrategy": "Feature test GET /api/v1/me returns 200 with user profile for authenticated user. Test company user includes company relation in response. Test candidate user does not include company field. Test unauthenticated request returns 401.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create UpdateProfileRequest FormRequest for validation",
+            "description": "Create app/Http/Requests/UpdateProfileRequest.php with validation rules for profile update including optional name and password change with current password verification.",
+            "dependencies": [],
+            "details": "Create UpdateProfileRequest extending Illuminate\\Foundation\\Http\\FormRequest. Implement rules() returning: 'name' => ['sometimes', 'string', 'max:255'], 'current_password' => ['required_with:password', 'current_password:api'], 'password' => ['sometimes', 'string', 'min:8', 'confirmed']. The 'current_password:api' rule validates against the JWT auth guard. Authorization returns true since route is already protected by auth:api middleware.",
+            "status": "pending",
+            "testStrategy": "Unit test validation passes with valid name update. Test validation fails when password provided without current_password. Test validation fails when current_password is incorrect. Test password confirmation rule works correctly.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Create UpdateProfile action for profile modifications",
+            "description": "Create app/Actions/Me/UpdateProfile.php extending BaseAction to handle PATCH /api/v1/me endpoint. Allow authenticated users to update their name and password.",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "Create UpdateProfile action in app/Actions/Me/ extending BaseAction. Implement handle(UpdateProfileRequest $request) that gets validated data and authenticated user. Update user->name if provided in request. Update user->password if provided (Laravel's hashed cast handles hashing automatically). Call $user->save(). If user role is UserRole::Company, load company relation. Return BaseResponse::success() with UserResource. No direct Eloquent queries beyond the authenticated user modification.",
+            "status": "pending",
+            "testStrategy": "Feature test PATCH /api/v1/me with name updates successfully and returns updated profile. Test password update requires valid current_password. Test password is properly hashed (not stored plaintext). Test partial updates work (name only, password only). Test unauthenticated returns 401.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Configure API routes for Me endpoints with auth middleware",
+            "description": "Create or update routes/api.php to define /api/v1/me routes with auth:api middleware. Register GetMe for GET and UpdateProfile for PATCH.",
+            "dependencies": [
+              2,
+              4
+            ],
+            "details": "Create routes/api.php if not exists. Define Route::prefix('v1/me')->middleware('auth:api')->group() containing: Route::get('/', GetMe::class) and Route::patch('/', UpdateProfile::class). Update bootstrap/app.php to include api routes using withRouting() adding api: __DIR__.'/../routes/api.php' with prefix 'api'. Import GetMe and UpdateProfile action classes at top of routes file.",
+            "status": "pending",
+            "testStrategy": "Feature test GET /api/v1/me is accessible with valid JWT token. Test PATCH /api/v1/me is accessible with valid JWT token. Test both endpoints return 401 without auth header. Test routes use correct HTTP methods (GET/PATCH). Integration test full flow: authenticate -> get profile -> update profile.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T03:45:53.117Z"
+      },
+      {
+        "id": "10",
+        "title": "Node.js Indexer Service with Redis Subscriber",
+        "description": "Create the Node.js indexer service in indexer/ directory: Redis subscriber listening to jobs:index and jobs:delete channels, Elasticsearch client wrapper, error handling with try/catch (no process crash), and Dockerfile for containerization.",
+        "details": "1. Create indexer/package.json:\n```json\n{\n  \"name\": \"jobboard-indexer\",\n  \"version\": \"1.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"start\": \"node index.js\"\n  },\n  \"dependencies\": {\n    \"@elastic/elasticsearch\": \"^8.0.0\",\n    \"redis\": \"^4.0.0\"\n  }\n}\n```\n\n2. Create indexer/elasticsearch.js:\n```js\nimport { Client } from '@elastic/elasticsearch';\n\nexport const createEsClient = (url) => {\n  return new Client({ node: url });\n};\n\nexport const ensureIndex = async (client, indexName) => {\n  const exists = await client.indices.exists({ index: indexName });\n  if (!exists) {\n    await client.indices.create({\n      index: indexName,\n      mappings: {\n        properties: {\n          id: { type: 'integer' },\n          title: { type: 'text', analyzer: 'standard', fields: { keyword: { type: 'keyword' } } },\n          description: { type: 'text', analyzer: 'standard' },\n          category: { type: 'keyword' },\n          employment_type: { type: 'keyword' },\n          location_city: { type: 'keyword' },\n          location_country: { type: 'keyword' },\n          is_remote: { type: 'boolean' },\n          salary_min: { type: 'integer' },\n          salary_max: { type: 'integer' },\n          currency: { type: 'keyword' },\n          status: { type: 'keyword' },\n          published_at: { type: 'date' },\n          company: {\n            type: 'object',\n            properties: {\n              id: { type: 'integer' },\n              name: { type: 'text', fields: { keyword: { type: 'keyword' } } },\n              industry: { type: 'keyword' }\n            }\n          }\n        }\n      }\n    });\n    console.log(`Created index: ${indexName}`);\n  }\n};\n```\n\n3. Create indexer/index.js:\n```js\nimport { createClient } from 'redis';\nimport { createEsClient, ensureIndex } from './elasticsearch.js';\n\nconst REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';\nconst ES_URL = process.env.ES_URL || 'http://localhost:9200';\nconst INDEX_NAME = 'jobs';\n\nconst redis = createClient({ url: REDIS_URL });\nconst es = createEsClient(ES_URL);\n\nredis.on('error', (err) => console.error('Redis error:', err));\n\nawait redis.connect();\nawait es.ping();\nawait ensureIndex(es, INDEX_NAME);\n\nconsole.log('Indexer ready — subscribed to jobs:index and jobs:delete');\n\nconst subscriber = redis.duplicate();\nawait subscriber.connect();\n\nawait subscriber.subscribe('jobs:index', async (message) => {\n  try {\n    const job = JSON.parse(message);\n    await es.index({ index: INDEX_NAME, id: String(job.id), document: job });\n    console.log(`Indexed job ${job.id}: ${job.title}`);\n  } catch (err) {\n    console.error('Failed to index job:', err.message);\n  }\n});\n\nawait subscriber.subscribe('jobs:delete', async (message) => {\n  try {\n    const { id } = JSON.parse(message);\n    await es.delete({ index: INDEX_NAME, id: String(id) });\n    console.log(`Deleted job ${id} from ES`);\n  } catch (err) {\n    console.error('Failed to delete job:', err.message);\n  }\n});\n\nprocess.on('SIGINT', async () => {\n  console.log('Shutting down...');\n  await subscriber.unsubscribe();\n  await subscriber.quit();\n  await redis.quit();\n  process.exit(0);\n});\n```\n\n4. Create indexer/Dockerfile:\n```dockerfile\nFROM node:20-alpine\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --only=production\nCOPY . .\nCMD [\"node\", \"index.js\"]\n```\n\n5. Update docker-compose.yml indexer service to use build context ./indexer",
+        "testStrategy": "- Integration test: start indexer, publish to jobs:index via redis-cli, verify document in ES\n- Integration test: publish to jobs:delete, verify document removed from ES\n- Test indexer handles malformed JSON without crashing\n- Test indexer handles ES connection failure gracefully (logs error, continues)\n- Test indexer creates index with correct mapping on first startup\n- Verify SIGINT handler gracefully shuts down connections\n- Run `make indexer` and verify logs show \"Indexer ready\"",
+        "priority": "high",
+        "dependencies": [
+          "1"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update package.json to ES Modules with Production Dependencies",
+            "description": "Convert indexer/package.json to use ES modules (type: module) and ensure correct dependency versions for @elastic/elasticsearch and redis/ioredis clients.",
+            "dependencies": [],
+            "details": "Update indexer/package.json to include: (1) \"type\": \"module\" for ES module support, (2) Correct dependency versions: \"@elastic/elasticsearch\": \"^8.0.0\" and \"ioredis\": \"^5.0.0\" (PRD specifies ioredis, not redis package), (3) Verify scripts section has \"start\": \"node index.js\". The package.json already exists at indexer/package.json with ioredis dependency - just needs type: module added.",
+            "status": "pending",
+            "testStrategy": "Run npm install in indexer directory and verify no errors. Check package.json has type: module. Verify node can import modules with import syntax.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Create elasticsearch.js ES Client Wrapper with Index Management",
+            "description": "Create indexer/elasticsearch.js module that exports createEsClient() and ensureIndex() functions for Elasticsearch client initialization and index creation with proper mappings from PRD.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create indexer/elasticsearch.js with: (1) createEsClient(url) function returning new Client({ node: url }), (2) ensureIndex(client, indexName) async function that checks if index exists via client.indices.exists(), creates if missing with full PRD-specified mappings including: id (integer), title (text with keyword subfield), description (text), category/employment_type/location_city/location_country/currency/status (keyword), is_remote (boolean), salary_min/salary_max (integer), published_at (date), and nested company object with id (integer), name (text with keyword), industry (keyword). Use ES module export syntax.",
+            "status": "pending",
+            "testStrategy": "Integration test: start Elasticsearch, call ensureIndex(), verify index created with correct mappings via GET /jobs/_mapping. Test idempotency by calling ensureIndex() twice.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Refactor index.js to ES Modules with Robust Error Handling",
+            "description": "Convert indexer/index.js from CommonJS to ES modules, integrate elasticsearch.js wrapper, add comprehensive try/catch error handling that logs errors without crashing the process.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Refactor indexer/index.js to: (1) Use ES module imports (import { createClient } from 'redis' or ioredis equivalent), (2) Import createEsClient and ensureIndex from ./elasticsearch.js, (3) Call ensureIndex() on startup to ensure jobs index exists with proper mappings, (4) Wrap all message handlers in try/catch - log errors with console.error but never throw or crash, (5) Handle JSON parse errors gracefully (malformed messages), (6) Handle ES connection errors gracefully (log and continue), (7) Use environment variables: REDIS_HOST, REDIS_PORT, ELASTICSEARCH_HOST (matching docker-compose.yml config). Current index.js uses ioredis which is correct per PRD.",
+            "status": "done",
+            "testStrategy": "Integration test: publish to jobs:index via redis-cli, verify document in ES. Publish to jobs:delete, verify removed. Send malformed JSON, verify error logged but process continues. Test ES connection failure handling.",
+            "updatedAt": "2026-05-21T15:05:18.505Z",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Add Graceful Shutdown Handling for SIGINT and SIGTERM",
+            "description": "Implement proper process signal handlers in index.js for graceful shutdown - unsubscribe from Redis channels and close connections before exit.",
+            "dependencies": [
+              3
+            ],
+            "details": "Add to indexer/index.js: (1) process.on('SIGINT', ...) handler for Ctrl+C, (2) process.on('SIGTERM', ...) handler for Docker stop, (3) In handlers: log 'Shutting down...', call subscriber.unsubscribe() to stop receiving messages, call subscriber.quit() to close subscriber connection, call redis.quit() to close main Redis connection, then process.exit(0). This ensures clean container shutdown without orphaned connections. Use async/await in signal handlers.",
+            "status": "done",
+            "testStrategy": "Start indexer, send SIGINT (Ctrl+C), verify 'Shutting down...' logged and process exits cleanly with code 0. Verify no Redis connection errors on next startup.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:05:19.818Z"
+          },
+          {
+            "id": 5,
+            "title": "Optimize Dockerfile for Production with Multi-stage Build",
+            "description": "Update indexer/Dockerfile to use production-optimized npm ci command, copy only necessary files, and follow Docker best practices for Node.js applications.",
+            "dependencies": [
+              1
+            ],
+            "details": "Update indexer/Dockerfile: (1) Keep FROM node:20-alpine base, (2) Set WORKDIR /app, (3) Copy package.json and package-lock.json (if exists) first for layer caching, (4) Run npm ci --only=production instead of npm install for reproducible builds, (5) Copy remaining source files (index.js, elasticsearch.js), (6) Set NODE_ENV=production environment variable, (7) Use CMD [\"node\", \"index.js\"]. The docker-compose.yml already correctly references ./indexer as build context and sets environment variables.",
+            "status": "done",
+            "testStrategy": "Build Docker image with docker build -t jobboard-indexer ./indexer. Verify image size is minimal. Run container, verify it starts and connects to Redis/ES. Verify npm ci reproducibility.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:05:21.127Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T15:05:22.406Z"
+      },
+      {
+        "id": "11",
+        "title": "Elasticsearch Repository and Search Service",
+        "description": "Implement ElasticsearchRepository wrapping elastic/elasticsearch-php client, SearchService building bool queries with must/filter, and configuration for ES host. Support full-text search, filters, fuzzy matching, boosting, and aggregations.",
+        "details": "1. Add config/elasticsearch.php:\n```php\nreturn [\n    'host' => env('ELASTICSEARCH_HOST', 'localhost:9200'),\n    'index' => 'jobs',\n];\n```\n\n2. Create app/Providers/ElasticsearchServiceProvider.php:\n```php\nclass ElasticsearchServiceProvider extends ServiceProvider\n{\n    public function register(): void\n    {\n        $this->app->singleton(\\Elastic\\Elasticsearch\\Client::class, function () {\n            return \\Elastic\\Elasticsearch\\ClientBuilder::create()\n                ->setHosts([config('elasticsearch.host')])\n                ->build();\n        });\n    }\n}\n```\n\n3. Create app/Repositories/ElasticsearchRepository.php implementing SearchRepositoryInterface:\n```php\nclass ElasticsearchRepository implements SearchRepositoryInterface\n{\n    public function __construct(\n        private readonly Client $client,\n    ) {}\n\n    public function search(array $query, int $from = 0, int $size = 15): array\n    {\n        $response = $this->client->search([\n            'index' => config('elasticsearch.index'),\n            'body' => $query,\n            'from' => $from,\n            'size' => $size,\n        ]);\n\n        return [\n            'hits' => array_map(fn($hit) => $hit['_source'], $response['hits']['hits']),\n            'total' => $response['hits']['total']['value'],\n            'aggregations' => $response['aggregations'] ?? [],\n        ];\n    }\n\n    public function index(int $id, array $document): void\n    {\n        $this->client->index([\n            'index' => config('elasticsearch.index'),\n            'id' => (string) $id,\n            'body' => $document,\n        ]);\n    }\n\n    public function delete(int $id): void\n    {\n        $this->client->delete([\n            'index' => config('elasticsearch.index'),\n            'id' => (string) $id,\n        ]);\n    }\n}\n```\n\n4. Create app/Services/SearchService.php implementing SearchServiceInterface:\n```php\nclass SearchService implements SearchServiceInterface\n{\n    public function __construct(\n        private readonly SearchRepositoryInterface $repository\n    ) {}\n\n    public function searchJobs(array $params): array\n    {\n        $query = $this->buildQuery($params);\n        $page = (int) ($params['page'] ?? 1);\n        $perPage = (int) ($params['per_page'] ?? 15);\n        $from = ($page - 1) * $perPage;\n\n        $result = $this->repository->search($query, $from, $perPage);\n\n        return [\n            'data' => $result['hits'],\n            'meta' => [\n                'current_page' => $page,\n                'per_page' => $perPage,\n                'total' => $result['total'],\n                'last_page' => (int) ceil($result['total'] / $perPage),\n            ],\n            'aggregations' => $result['aggregations'],\n        ];\n    }\n\n    private function buildQuery(array $params): array\n    {\n        $must = [];\n        $filter = [['term' => ['status' => 'active']]];\n\n        if (!empty($params['q'])) {\n            $must[] = [\n                'multi_match' => [\n                    'query' => $params['q'],\n                    'fields' => ['title^3', 'company.name^2', 'description^1'],\n                    'fuzziness' => 'AUTO',\n                ],\n            ];\n        }\n\n        if (!empty($params['filter']['category'])) {\n            $filter[] = ['term' => ['category' => $params['filter']['category']]];\n        }\n\n        if (!empty($params['filter']['location'])) {\n            $filter[] = ['term' => ['location_city' => $params['filter']['location']]];\n        }\n\n        if (!empty($params['filter']['employment_type'])) {\n            $filter[] = ['term' => ['employment_type' => $params['filter']['employment_type']]];\n        }\n\n        if (!empty($params['filter']['salary_min'])) {\n            $filter[] = ['range' => ['salary_min' => ['gte' => (int) $params['filter']['salary_min']]]];\n        }\n\n        if (!empty($params['filter']['is_remote'])) {\n            $filter[] = ['term' => ['is_remote' => $params['filter']['is_remote'] === 'true']];\n        }\n\n        return [\n            'query' => ['bool' => ['must' => $must ?: ['match_all' => (object) []], 'filter' => $filter]],\n            'sort' => [['_score' => 'desc'], ['published_at' => 'desc']],\n            'aggs' => ['by_category' => ['terms' => ['field' => 'category']]],\n        ];\n    }\n}\n```\n\n5. Bind in AppServiceProvider:\n```php\n$this->app->bind(SearchRepositoryInterface::class, ElasticsearchRepository::class);\n$this->app->bind(SearchServiceInterface::class, SearchService::class);\n```",
+        "testStrategy": "- Unit test SearchService::buildQuery() generates correct bool query with must and filter\n- Unit test empty 'q' param uses match_all in must clause\n- Unit test 'q' param generates multi_match with fuzziness:AUTO and field boosting\n- Unit test filters (category, location, salary_min) added to filter clause\n- Unit test status:active always present in filter\n- Integration test ElasticsearchRepository::search() returns hits and total\n- Mock ES client in unit tests to verify correct DSL sent",
+        "priority": "high",
+        "dependencies": [
+          "10"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create Elasticsearch configuration file",
+            "description": "Create config/elasticsearch.php with host, index name, and connection settings. Add ELASTICSEARCH_INDEX env variable to .env.example.",
+            "dependencies": [],
+            "details": "Create config/elasticsearch.php returning an array with: 'host' => env('ELASTICSEARCH_HOST', 'http://localhost:9200'), 'index' => env('ELASTICSEARCH_INDEX', 'jobs'). The config should be minimal and focused. Verify .env.example already has ELASTICSEARCH_HOST (it does from analysis). Optionally add ELASTICSEARCH_INDEX if needed for flexibility. Follow existing config file patterns in the codebase.",
+            "status": "pending",
+            "testStrategy": "Unit test that config('elasticsearch.host') and config('elasticsearch.index') return expected default values. Test that env variables override defaults correctly.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Create ElasticsearchServiceProvider with client singleton",
+            "description": "Create app/Providers/ElasticsearchServiceProvider.php that registers the Elastic\\Elasticsearch\\Client as a singleton. Register the provider in bootstrap/providers.php.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create ElasticsearchServiceProvider extending ServiceProvider. In register() method, use $this->app->singleton(\\Elastic\\Elasticsearch\\Client::class, fn() => ...) to create the ES client via ClientBuilder::create()->setHosts([config('elasticsearch.host')])->build(). Add ElasticsearchServiceProvider::class to bootstrap/providers.php array. Import from Elastic\\Elasticsearch\\Client and Elastic\\Elasticsearch\\ClientBuilder.",
+            "status": "pending",
+            "testStrategy": "Unit test that resolving Client from container returns same instance (singleton behavior). Test that client is configured with correct host from config.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Implement ElasticsearchRepository with search, index, delete methods",
+            "description": "Create app/Repositories/ElasticsearchRepository.php implementing SearchRepositoryInterface with search(), index(), delete() methods wrapping the ES client.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create ElasticsearchRepository implementing SearchRepositoryInterface. Inject Elastic\\Elasticsearch\\Client via constructor. search(array $params): array - call $client->search() with index from config, parse response['hits']['hits'] into array of _source documents, return ['hits' => ..., 'total' => response['hits']['total']['value'], 'aggregations' => ...]. index(int $id, array $document): void - call $client->index() with index, id as string, body as document. delete(int $id): void - call $client->delete() with index and id. Handle 404 on delete gracefully if document doesn't exist (ignore 404 errors or catch exception).",
+            "status": "done",
+            "testStrategy": "Unit test search() method returns correct structure with hits, total, aggregations. Unit test index() calls ES client with correct parameters. Unit test delete() calls ES client delete method. Mock the ES Client for unit tests.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:10:47.981Z"
+          },
+          {
+            "id": 4,
+            "title": "Implement SearchService with query building and pagination",
+            "description": "Create app/Services/SearchService.php implementing SearchServiceInterface with searchJobs() method that builds bool queries with must/filter, fuzzy matching, boosting, and aggregations.",
+            "dependencies": [
+              3
+            ],
+            "details": "Create SearchService implementing SearchServiceInterface. Inject SearchRepositoryInterface via constructor. Implement searchJobs(array $params): array. Build bool query: must clause uses multi_match with fields ['title^3', 'company.name^2', 'description^1'] and fuzziness 'AUTO' when 'q' param exists, else match_all. filter clause always includes ['term' => ['status' => 'active']], plus optional filters for category, location_city, employment_type, salary_min (range gte), is_remote (boolean). Add sort by _score desc, then published_at desc. Add aggregations: by_category using terms on category field. Calculate pagination from page/per_page params (default page=1, per_page=15). Return ['data' => hits, 'meta' => pagination info, 'aggregations' => ...].",
+            "status": "pending",
+            "testStrategy": "Unit test buildQuery() generates correct bool query structure with must and filter. Unit test empty 'q' uses match_all. Unit test 'q' generates multi_match with fuzziness AUTO and field boosting (title^3, company.name^2, description^1). Unit test filters (category, location, salary_min, employment_type, is_remote) added to filter clause. Unit test pagination calculation is correct.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Bind interfaces in AppServiceProvider and write tests",
+            "description": "Add interface bindings for SearchRepositoryInterface and SearchServiceInterface in AppServiceProvider. Create unit tests for SearchService query building and ElasticsearchRepository.",
+            "dependencies": [
+              4
+            ],
+            "details": "In AppServiceProvider::register(), add: $this->app->bind(SearchRepositoryInterface::class, ElasticsearchRepository::class) and $this->app->bind(SearchServiceInterface::class, SearchService::class). Create tests/Unit/Services/SearchServiceTest.php with tests for: buildQuery generates correct bool structure, empty q uses match_all, q param generates multi_match with fuzziness and boosting, filters added correctly to filter clause, pagination meta calculated correctly. Create tests/Unit/Repositories/ElasticsearchRepositoryTest.php testing search/index/delete methods with mocked ES client.",
+            "status": "done",
+            "testStrategy": "Feature test that resolving SearchServiceInterface from container returns SearchService instance. Feature test that resolving SearchRepositoryInterface returns ElasticsearchRepository. Run all unit tests to verify SearchService query building logic and ElasticsearchRepository method calls.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:12:24.142Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T15:12:25.414Z"
+      },
+      {
+        "id": "12",
+        "title": "Search Jobs Endpoint via Elasticsearch",
+        "description": "Implement SearchJobs action handling GET /jobs with query parameters for full-text search, filters, sorting, and pagination. Switch from MySQL to Elasticsearch for the public job listing endpoint.",
+        "details": "1. Create app/Actions/Search/SearchJobs.php:\n```php\nclass SearchJobs extends BaseAction\n{\n    public function __construct(\n        private readonly SearchServiceInterface $searchService\n    ) {}\n\n    public function handle(Request $request): JsonResponse\n    {\n        $params = [\n            'q' => $request->query('q'),\n            'filter' => $request->query('filter', []),\n            'sort' => $request->query('sort', 'published_at'),\n            'page' => $request->query('page', 1),\n            'per_page' => $request->query('per_page', 15),\n        ];\n\n        $result = $this->searchService->searchJobs($params);\n\n        return BaseResponse::success($result['data'], 200, [\n            'pagination' => $result['meta'],\n            'aggregations' => $result['aggregations'],\n        ]);\n    }\n}\n```\n\n2. Create app/Http/Resources/SearchResultResource.php for consistent response formatting\n\n3. Update routes/api.php:\n```php\n// Public search endpoint - uses Elasticsearch\nRoute::get('/v1/jobs', SearchJobs::class);\n\n// Single job lookup - uses MySQL (for detail page)\nRoute::get('/v1/jobs/{id}', GetJob::class);\n```\n\n4. Document supported query parameters:\n```\nGET /api/v1/jobs\n  ?q=backend engineer         # full-text search on title, description, company.name\n  ?filter[category]=tech      # exact match on category\n  ?filter[location]=Yogyakarta # exact match on location_city\n  ?filter[employment_type]=full_time\n  ?filter[salary_min]=10000000  # minimum salary threshold\n  ?filter[is_remote]=true\n  ?sort=published_at          # sort field (default: relevance when q present)\n  ?page=1&per_page=15\n```\n\n5. Response includes aggregations for faceted search:\n```json\n{\n  \"success\": true,\n  \"data\": [...],\n  \"meta\": {\n    \"pagination\": { \"current_page\": 1, \"per_page\": 15, \"total\": 42, \"last_page\": 3 },\n    \"aggregations\": {\n      \"by_category\": {\n        \"buckets\": [\n          { \"key\": \"tech\", \"doc_count\": 25 },\n          { \"key\": \"marketing\", \"doc_count\": 10 }\n        ]\n      }\n    }\n  }\n}\n```",
+        "testStrategy": "- Feature test GET /jobs returns active jobs from Elasticsearch\n- Feature test GET /jobs?q=backend returns jobs matching \"backend\" with fuzzy tolerance\n- Feature test GET /jobs?q=backand (typo) returns backend jobs via fuzziness\n- Feature test GET /jobs?filter[category]=tech returns only tech jobs\n- Feature test GET /jobs?filter[salary_min]=10000000 excludes lower-salary jobs\n- Feature test GET /jobs?filter[is_remote]=true returns only remote jobs\n- Feature test GET /jobs response includes aggregations.by_category\n- Feature test pagination meta has correct current_page, total, last_page\n- Integration test: create job via POST /jobs, wait for indexing, verify appears in GET /jobs search",
+        "priority": "high",
+        "dependencies": [
+          "11"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create SearchJobsRequest Form Request for Query Parameter Validation",
+            "description": "Create a dedicated FormRequest class to validate all search query parameters including q, filter array (category, location, employment_type, salary_min, is_remote), sort, page, and per_page.",
+            "dependencies": [],
+            "details": "Create app/Http/Requests/SearchJobsRequest.php extending FormRequest. Validate: 'q' as nullable string max 255, 'filter' as nullable array, 'filter.category' as nullable string, 'filter.location' as nullable string, 'filter.employment_type' as nullable string (in: full_time, part_time, contract, internship), 'filter.salary_min' as nullable integer min 0, 'filter.is_remote' as nullable boolean, 'sort' as nullable string (in: published_at, -published_at, salary_min, -salary_min), 'page' as nullable integer min 1, 'per_page' as nullable integer min 1 max 100. Return validated() method with defaults: page=1, per_page=15, sort='published_at' when q is empty or '-_score' when q is present.",
+            "status": "done",
+            "testStrategy": "Unit test validates correct parameters pass validation. Unit test rejects invalid employment_type values. Unit test rejects per_page > 100. Unit test applies default values correctly.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:16:14.683Z"
+          },
+          {
+            "id": 2,
+            "title": "Create SearchResultResource for Consistent ES Response Formatting",
+            "description": "Create a resource class to transform Elasticsearch search results into the standardized API response format with data array, pagination meta, and aggregations.",
+            "dependencies": [],
+            "details": "Create app/Http/Resources/SearchResultResource.php. The resource should accept raw ES search response and transform it to: data array containing job documents (extracting _source from each hit), pagination meta with current_page, per_page, total (from hits.total.value), and calculated last_page. Include aggregations section transforming ES aggregation buckets (by_category, by_location, by_employment_type) into the format { buckets: [{ key: string, doc_count: int }] }. Handle edge cases: empty results, missing aggregations, null total. Method signature: static make(array $esResponse, int $page, int $perPage): array returning shaped array for BaseResponse.",
+            "status": "done",
+            "testStrategy": "Unit test transforms ES response with hits correctly. Unit test calculates last_page correctly (ceil(total/per_page)). Unit test handles empty hits array. Unit test transforms aggregation buckets correctly. Unit test handles missing aggregations gracefully.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:16:27.217Z"
+          },
+          {
+            "id": 3,
+            "title": "Create SearchJobs Action with SearchService Integration",
+            "description": "Implement the SearchJobs action class extending BaseAction that receives validated request parameters, delegates to SearchServiceInterface, and returns formatted JSON response using BaseResponse.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Create app/Actions/Search/SearchJobs.php extending BaseAction. Constructor inject SearchServiceInterface. Implement asController() method receiving SearchJobsRequest. Build params array: q from request, filter array (category, location mapped to location_city, employment_type, salary_min, is_remote), sort field, page, per_page. Call $this->searchService->searchJobs($params). Use SearchResultResource::make() to format the ES response. Return BaseResponse::success() with data and meta containing pagination and aggregations. Ensure action is invokable as a controller via lorisleiva/laravel-actions.",
+            "status": "done",
+            "testStrategy": "Unit test action calls SearchServiceInterface::searchJobs with correct params. Unit test maps 'location' filter to 'location_city' for ES. Unit test returns BaseResponse format. Integration test with mocked SearchService returns correct JSON structure.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:16:28.494Z"
+          },
+          {
+            "id": 4,
+            "title": "Configure API Routes with Versioned Endpoints",
+            "description": "Set up routes/api.php and configure Laravel 13 routing in bootstrap/app.php to expose GET /api/v1/jobs endpoint routing to SearchJobs action.",
+            "dependencies": [
+              3
+            ],
+            "details": "Create routes/api.php file. Update bootstrap/app.php withRouting() to include api: __DIR__.'/../routes/api.php' with prefix 'api'. In routes/api.php: add Route::prefix('v1')->group() containing Route::get('/jobs', SearchJobs::class)->name('jobs.search'). Ensure lorisleiva/laravel-actions is properly configured to allow actions as controllers. Verify route is accessible at /api/v1/jobs. Document query parameters in route comments: q (full-text), filter[category], filter[location], filter[employment_type], filter[salary_min], filter[is_remote], sort, page, per_page.",
+            "status": "done",
+            "testStrategy": "Feature test GET /api/v1/jobs returns 200 with correct JSON structure. Feature test route name 'jobs.search' resolves correctly. Feature test query parameters are passed through to action.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:16:50.813Z"
+          },
+          {
+            "id": 5,
+            "title": "Create Feature Tests for Search Jobs Endpoint",
+            "description": "Implement comprehensive feature tests covering full-text search, filtering, sorting, pagination, fuzzy matching, and aggregation responses for the GET /api/v1/jobs endpoint.",
+            "dependencies": [
+              4
+            ],
+            "details": "Create tests/Feature/SearchJobsTest.php extending TestCase with RefreshDatabase. Mock ElasticsearchRepository or use ES test instance. Test cases: 1) GET /jobs returns 200 with empty results structure when no jobs exist, 2) GET /jobs?q=backend returns matching jobs with relevance sorting, 3) GET /jobs?q=backand (typo) returns backend jobs via fuzziness:AUTO, 4) GET /jobs?filter[category]=tech returns only tech category jobs, 5) GET /jobs?filter[location]=Yogyakarta filters by location_city, 6) GET /jobs?filter[salary_min]=10000000 filters by minimum salary, 7) GET /jobs?filter[is_remote]=true filters remote jobs, 8) GET /jobs?sort=-published_at returns descending order, 9) GET /jobs?page=2&per_page=5 returns correct pagination meta, 10) Response includes aggregations (by_category buckets). Each test asserts correct JSON structure, status code 200, and Content-Type application/json.",
+            "status": "done",
+            "testStrategy": "All tests verify HTTP response structure matches API design spec. Tests use database factories to seed Job/Company data. Tests may mock SearchServiceInterface to isolate endpoint behavior. Coverage includes happy path, edge cases (empty results, invalid params), and error responses.",
+            "parentId": "undefined",
+            "updatedAt": "2026-05-21T15:23:25.582Z"
+          }
+        ],
+        "updatedAt": "2026-05-21T15:23:25.582Z"
+      },
+      {
+        "id": "13",
+        "title": "Artisan Reindex Command with Alias Strategy",
+        "description": "Create php artisan es:reindex command that performs full MySQL → Elasticsearch reindex with zero-downtime alias swap strategy. Batch documents using Promise.all() equivalent, create versioned indexes, and atomically switch alias.",
+        "details": "1. Create app/Console/Commands/ReindexElasticsearch.php:\n```php\nclass ReindexElasticsearch extends Command\n{\n    protected $signature = 'es:reindex {--fresh : Delete existing index first}';\n    protected $description = 'Reindex all jobs from MySQL to Elasticsearch';\n\n    public function __construct(\n        private readonly Client $esClient,\n        private readonly JobRepositoryInterface $jobRepository\n    ) {\n        parent::__construct();\n    }\n\n    public function handle(): int\n    {\n        $alias = config('elasticsearch.index'); // 'jobs'\n        $newIndex = $alias . '_v' . time();\n\n        $this->info(\"Creating new index: {$newIndex}\");\n        $this->createIndex($newIndex);\n\n        $this->info('Indexing jobs from MySQL...');\n        $this->indexAllJobs($newIndex);\n\n        $this->info('Switching alias...');\n        $this->switchAlias($alias, $newIndex);\n\n        $this->info('Cleaning up old indexes...');\n        $this->cleanupOldIndexes($alias, $newIndex);\n\n        $this->info('Reindex complete!');\n        return Command::SUCCESS;\n    }\n\n    private function createIndex(string $indexName): void\n    {\n        $this->esClient->indices()->create([\n            'index' => $indexName,\n            'body' => [\n                'mappings' => [...] // same mapping as indexer\n            ],\n        ]);\n    }\n\n    private function indexAllJobs(string $indexName): void\n    {\n        $bar = $this->output->createProgressBar();\n        $bar->start();\n\n        Job::with('company:id,name,industry')\n            ->where('status', JobStatus::Active)\n            ->chunkById(100, function ($jobs) use ($indexName, $bar) {\n                $params = ['body' => []];\n                foreach ($jobs as $job) {\n                    $params['body'][] = ['index' => ['_index' => $indexName, '_id' => $job->id]];\n                    $params['body'][] = $job->toSearchArray();\n                }\n                $this->esClient->bulk($params);\n                $bar->advance(count($jobs));\n            });\n\n        $bar->finish();\n        $this->newLine();\n    }\n\n    private function switchAlias(string $alias, string $newIndex): void\n    {\n        $actions = [['add' => ['index' => $newIndex, 'alias' => $alias]]];\n\n        // Remove alias from old indexes\n        $existingIndexes = $this->esClient->indices()->getAlias(['name' => $alias])->asArray();\n        foreach (array_keys($existingIndexes) as $oldIndex) {\n            if ($oldIndex !== $newIndex) {\n                $actions[] = ['remove' => ['index' => $oldIndex, 'alias' => $alias]];\n            }\n        }\n\n        $this->esClient->indices()->updateAliases(['body' => ['actions' => $actions]]);\n    }\n\n    private function cleanupOldIndexes(string $alias, string $keepIndex): void\n    {\n        $pattern = $alias . '_v*';\n        $indexes = $this->esClient->indices()->get(['index' => $pattern])->asArray();\n        foreach (array_keys($indexes) as $index) {\n            if ($index !== $keepIndex) {\n                $this->esClient->indices()->delete(['index' => $index]);\n                $this->line(\"Deleted old index: {$index}\");\n            }\n        }\n    }\n}\n```\n\n2. Add Makefile target:\n```makefile\nes-reindex:\n\tpodman-compose exec app php artisan es:reindex\n```\n\n3. Update ElasticsearchRepository to always use alias 'jobs', never versioned index names",
+        "testStrategy": "- Integration test: run es:reindex, verify all active jobs indexed\n- Test alias 'jobs' points to new versioned index after reindex\n- Test old indexes are deleted after successful alias switch\n- Test --fresh flag deletes all existing indexes before reindexing\n- Test bulk indexing uses chunks of 100 documents\n- Test progress bar updates during indexing\n- Test command returns SUCCESS exit code on completion\n- Verify zero downtime: search works during reindex via alias",
+        "priority": "medium",
+        "dependencies": [
+          "11"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create Elasticsearch configuration file and service provider",
+            "description": "Add config/elasticsearch.php with host and index settings, and create ElasticsearchServiceProvider to bind the ES client singleton",
+            "dependencies": [],
+            "details": "1. Create config/elasticsearch.php with host (from ELASTICSEARCH_HOST env, default localhost:9200) and index alias ('jobs'). 2. Create app/Providers/ElasticsearchServiceProvider.php binding \\Elastic\\Elasticsearch\\Client::class as singleton using ClientBuilder. 3. Register the provider in bootstrap/providers.php. 4. Add ELASTICSEARCH_HOST to .env.example.",
+            "status": "pending",
+            "testStrategy": "Unit test verifying the ES client singleton is properly bound and configured with the correct host from config",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Add toSearchArray method to Job model",
+            "description": "Implement toSearchArray() method on the Job model to transform Eloquent model into ES document format matching the Node.js indexer mapping",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Add toSearchArray() method to App\\Models\\Job returning array with: id, title, description, category, employment_type, location_city, location_country, is_remote, salary_min, salary_max, currency, status, published_at (RFC 3339 format), and nested company object (id, name, industry). 2. Ensure field names and types exactly match the mapping in indexer/elasticsearch.js (lines 14-45). 3. Handle nullable fields appropriately.",
+            "status": "pending",
+            "testStrategy": "Unit test asserting toSearchArray() returns correct structure with all fields, handles nullable salary fields, and formats published_at correctly",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create ReindexElasticsearch Artisan command with index creation",
+            "description": "Implement the base es:reindex command with signature, constructor DI, and createIndex method that replicates the ES mapping from the Node.js indexer",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "1. Create app/Console/Commands/ReindexElasticsearch.php extending Command. 2. Define signature 'es:reindex {--fresh : Delete all existing indexes first}'. 3. Inject Elastic\\Elasticsearch\\Client and JobRepositoryInterface via constructor. 4. Implement createIndex($indexName) method creating index with exact mappings from indexer/elasticsearch.js (lines 14-45): text fields with keyword sub-fields for title and company.name, keyword fields for category/employment_type/location_*/status/currency, integer for id/salary_min/salary_max, boolean for is_remote, date for published_at, nested object for company.",
+            "status": "pending",
+            "testStrategy": "Integration test verifying createIndex() creates ES index with correct mappings matching the Node.js indexer schema",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Implement bulk indexing with chunked queries",
+            "description": "Add indexAllJobs method using chunkById for memory-efficient iteration and ES bulk API for batch document indexing with progress bar",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "1. Implement indexAllJobs($indexName) method. 2. Use Job::with('company:id,name,industry')->where('status', 'active')->chunkById(100, callback) for memory-efficient iteration. 3. Build bulk request params array: alternate between index action metadata and document body using toSearchArray(). 4. Call esClient->bulk($params) for each chunk. 5. Add progress bar using $this->output->createProgressBar() with advance() per chunk. 6. Handle --fresh flag by deleting pattern '{alias}_v*' before creating new index.",
+            "status": "pending",
+            "testStrategy": "Integration test running reindex on test data, verifying all active jobs indexed in ES with correct document count and structure",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Implement zero-downtime alias swap and cleanup",
+            "description": "Add switchAlias and cleanupOldIndexes methods for atomic alias switching and old index deletion",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "1. Implement switchAlias($alias, $newIndex): get existing indexes with alias via indices()->getAlias(), build atomic updateAliases actions (add new, remove old), execute in single call. 2. Implement cleanupOldIndexes($alias, $keepIndex): get all indexes matching pattern '{alias}_v*', delete each except keepIndex. 3. Wire up full handle() flow: create versioned index (alias + '_v' + time()), indexAllJobs, switchAlias atomically, cleanupOldIndexes. 4. Add proper error handling with Command::FAILURE return on exceptions. 5. Verify Makefile es-reindex target already exists (line 46-47).",
+            "status": "pending",
+            "testStrategy": "Integration test verifying: alias points to new versioned index after reindex, old indexes deleted, alias swap is atomic (test by querying during reindex)",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T04:06:16.849Z"
+      },
+      {
+        "id": "14",
+        "title": "API Documentation with Swagger/OpenAPI",
+        "description": "Configure darkaonline/l5-swagger and add OpenAPI 3.0 annotations to all endpoints. Generate interactive API documentation at /api/documentation with JWT authentication support.",
+        "details": "1. Publish Swagger config:\n```bash\nphp artisan vendor:publish --provider=\"L5Swagger\\L5SwaggerServiceProvider\"\n```\n\n2. Configure config/l5-swagger.php:\n```php\n'documentations' => [\n    'default' => [\n        'api' => [\n            'title' => 'JobBoard API',\n            'description' => 'Laravel 13 Job Board REST API with Elasticsearch',\n            'version' => '1.0.0',\n        ],\n        'routes' => [\n            'api' => 'api/documentation',\n        ],\n        'paths' => [\n            'docs' => storage_path('api-docs'),\n            'annotations' => [base_path('app')],\n        ],\n    ],\n],\n'security' => [\n    'Bearer' => [\n        'type' => 'http',\n        'scheme' => 'bearer',\n        'bearerFormat' => 'JWT',\n    ],\n],\n```\n\n3. Add base annotations to app/Http/Controllers/Controller.php:\n```php\n/**\n * @OA\\Info(\n *     title=\"JobBoard API\",\n *     version=\"1.0.0\",\n *     description=\"Laravel 13 Job Board REST API\"\n * )\n * @OA\\Server(url=\"http://localhost:8000/api/v1\")\n * @OA\\SecurityScheme(\n *     securityScheme=\"bearerAuth\",\n *     type=\"http\",\n *     scheme=\"bearer\",\n *     bearerFormat=\"JWT\"\n * )\n */\n```\n\n4. Add annotations to Actions (example for SearchJobs):\n```php\n/**\n * @OA\\Get(\n *     path=\"/jobs\",\n *     summary=\"Search jobs via Elasticsearch\",\n *     tags={\"Jobs\"},\n *     @OA\\Parameter(name=\"q\", in=\"query\", description=\"Full-text search query\"),\n *     @OA\\Parameter(name=\"filter[category]\", in=\"query\", description=\"Filter by category\"),\n *     @OA\\Parameter(name=\"filter[location]\", in=\"query\", description=\"Filter by city\"),\n *     @OA\\Parameter(name=\"filter[salary_min]\", in=\"query\", description=\"Minimum salary\"),\n *     @OA\\Parameter(name=\"page\", in=\"query\", description=\"Page number\"),\n *     @OA\\Parameter(name=\"per_page\", in=\"query\", description=\"Items per page\"),\n *     @OA\\Response(\n *         response=200,\n *         description=\"Success\",\n *         @OA\\JsonContent(ref=\"#/components/schemas/JobSearchResponse\")\n *     )\n * )\n */\n```\n\n5. Define schemas for resources, requests, and responses\n\n6. Generate docs: `php artisan l5-swagger:generate`\n\n7. Add Makefile target:\n```makefile\nswagger:\n\tpodman-compose exec app php artisan l5-swagger:generate\n```",
+        "testStrategy": "- Verify /api/documentation loads Swagger UI\n- Verify all endpoints documented with correct HTTP methods\n- Verify JWT security scheme appears in Authorize button\n- Test Try It Out functionality for public endpoints\n- Test authenticated endpoints work with valid JWT in Swagger UI\n- Verify request/response schemas match actual API behavior\n- Run `make swagger` and verify no annotation errors",
+        "priority": "low",
+        "dependencies": [
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "12"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Publish and Configure l5-swagger Package",
+            "description": "Publish the l5-swagger configuration file and configure it for the JobBoard API with proper settings for Laravel 13, including API info, paths, and routes.",
+            "dependencies": [],
+            "details": "Run `php artisan vendor:publish --provider=\"L5Swagger\\L5SwaggerServiceProvider\"` to publish config/l5-swagger.php. Configure the documentation settings: set API title to 'JobBoard API', version '1.0.0', description 'Laravel 13 Job Board REST API with Elasticsearch'. Set routes.api to 'api/documentation', paths.docs to storage_path('api-docs'), and paths.annotations to [base_path('app')]. Configure the security scheme for JWT Bearer authentication with type 'http', scheme 'bearer', and bearerFormat 'JWT'. Add 'swagger' target to Makefile: `podman-compose exec app php artisan l5-swagger:generate`.",
+            "status": "pending",
+            "testStrategy": "Verify config/l5-swagger.php exists after publish. Run `make swagger` to generate docs. Navigate to /api/documentation and verify Swagger UI loads without errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Add Base OpenAPI Annotations to Controller",
+            "description": "Add the base OpenAPI annotations to app/Http/Controllers/Controller.php including @OA\\Info, @OA\\Server, and @OA\\SecurityScheme for JWT authentication.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify app/Http/Controllers/Controller.php to add PHPDoc annotations: @OA\\Info with title='JobBoard API', version='1.0.0', description='Laravel 13 Job Board REST API with Elasticsearch'. Add @OA\\Server with url='http://localhost:8000/api/v1' and description='Local Development Server'. Add @OA\\SecurityScheme with securityScheme='bearerAuth', type='http', scheme='bearer', bearerFormat='JWT', description='Enter JWT token'. These base annotations define the API metadata and authentication scheme that all endpoint annotations will reference.",
+            "status": "pending",
+            "testStrategy": "Run `make swagger` to regenerate docs. Verify /api/documentation shows correct API title, version, and the Authorize button appears with JWT Bearer authentication option.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Define OpenAPI Schema Components for Models and Resources",
+            "description": "Create OpenAPI schema definitions for all domain models (Job, Company, User, Application), response wrappers (BaseResponse, PaginationMeta), and request bodies.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create app/OpenApi/Schemas.php to hold reusable schema definitions using @OA\\Schema annotations. Define JobSchema with properties: id (integer), company_id (integer), title (string), description (string), category (string), employment_type (enum: full_time, part_time, contract, internship), location_city (string, nullable), location_country (string), is_remote (boolean), salary_min (integer, nullable), salary_max (integer, nullable), currency (string), status (enum: draft, active, closed), published_at (string, format datetime, nullable), expires_at (string, format datetime, nullable). Define CompanySchema, UserSchema, ApplicationSchema similarly based on migrations. Define BaseResponseSchema with success (boolean) and data (object). Define PaginationMetaSchema with current_page, per_page, total, last_page. Define JobSearchResponseSchema wrapping jobs array with pagination.",
+            "status": "pending",
+            "testStrategy": "Run `make swagger` and verify schemas appear under Schemas section in Swagger UI. Verify all model properties match database schema types and constraints.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Add OpenAPI Annotations to Auth and Me Action Classes",
+            "description": "Add OpenAPI endpoint annotations to all authentication Actions (Register, Login, Logout, RefreshToken, ForgotPassword, ResetPassword) and Me module Actions (GetMe, UpdateProfile).",
+            "dependencies": [
+              3
+            ],
+            "details": "Add @OA annotations to Auth Actions when they exist (Tasks 5 dependency): RegisterAction: POST /auth/register with request body (name, email, password, password_confirmation, role), responses 201 (JWT token), 422 (validation). LoginAction: POST /auth/login with request body (email, password), responses 200 (JWT token), 401 (invalid credentials). LogoutAction: POST /auth/logout with security bearerAuth, response 204. RefreshTokenAction: POST /auth/refresh with security bearerAuth, response 200 (new token). ForgotPasswordAction: POST /auth/forgot-password, response 200 (message). ResetPasswordAction: POST /auth/reset-password, response 200 (message). Add annotations to Me Actions (Task 9 dependency): GetMeAction: GET /me with security bearerAuth, response 200 (UserResource). UpdateProfileAction: PATCH /me with request body (name, password, password_confirmation), response 200.",
+            "status": "pending",
+            "testStrategy": "Run `make swagger` and verify all Auth and Me endpoints appear with correct HTTP methods, request/response schemas. Test Try It Out for login endpoint and verify JWT token is returned.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Add OpenAPI Annotations to Jobs, Companies, and Applications Actions",
+            "description": "Add comprehensive OpenAPI annotations to all CRUD and search Actions for Jobs, Companies, and Applications modules including query parameters, filters, pagination, and security requirements.",
+            "dependencies": [
+              3
+            ],
+            "details": "Add @OA annotations to Job Actions (Tasks 6, 7, 12 dependencies): SearchJobsAction: GET /jobs with query params q (full-text search), filter[category], filter[location], filter[salary_min], filter[salary_max], filter[employment_type], filter[is_remote], page, per_page, sort; response 200 with JobSearchResponse schema. CreateJobAction: POST /jobs with security bearerAuth (company role), request body from JobRequest, responses 201 (job), 403 (forbidden), 422. ShowJobAction: GET /jobs/{id}, response 200 (job), 404. UpdateJobAction: PUT /jobs/{id} with security bearerAuth, responses 200, 403, 404. DeleteJobAction: DELETE /jobs/{id} with security bearerAuth, response 204, 403, 404. Add Company Actions (Task 8): ListCompanies GET /companies, ShowCompany GET /companies/{id}, CreateCompany POST /companies, UpdateCompany PUT /companies/{id}. Add Application Actions: ApplyToJobAction POST /jobs/{id}/apply with security bearerAuth (candidate role), ListMyApplicationsAction GET /me/applications, UpdateApplicationStatusAction PATCH /applications/{id}.",
+            "status": "pending",
+            "testStrategy": "Run `make swagger` and verify all Job, Company, Application endpoints are documented. Verify filter parameters appear correctly. Test authenticated endpoints show lock icon. Test Try It Out with JWT for protected endpoints. Verify request/response examples match actual API behavior.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T11:08:06.992Z"
+      },
+      {
+        "id": "15",
+        "title": "Test Suite with 100% Coverage and EXPLAIN Assertions",
+        "description": "Complete test suite achieving 100% line/method coverage: Feature tests for all HTTP endpoints, Unit tests for services/repositories, EXPLAIN assertions for repository queries, and mock Redis/ES for isolation.",
+        "details": "1. Configure phpunit.xml for test database:\n```xml\n<env name=\"DB_DATABASE\" value=\"jobboard_test\"/>\n<env name=\"QUEUE_CONNECTION\" value=\"sync\"/>\n<env name=\"MAIL_MAILER\" value=\"array\"/>\n<env name=\"ELASTICSEARCH_HOST\" value=\"elasticsearch:9200\"/>\n```\n\n2. Create tests/TestCase.php base class:\n```php\nabstract class TestCase extends BaseTestCase\n{\n    use RefreshDatabase;\n\n    protected function setUp(): void\n    {\n        parent::setUp();\n        // Mock Redis by default to avoid side effects\n        Redis::shouldReceive('publish')->andReturn(1);\n    }\n\n    protected function actingAsCandidate(): User { ... }\n    protected function actingAsCompany(): User { ... }\n    protected function actingAsAdmin(): User { ... }\n}\n```\n\n3. Feature tests structure:\n- tests/Feature/Auth/RegisterTest.php\n- tests/Feature/Auth/LoginTest.php\n- tests/Feature/Auth/LogoutTest.php\n- tests/Feature/Jobs/CreateJobTest.php\n- tests/Feature/Jobs/UpdateJobTest.php\n- tests/Feature/Jobs/DeleteJobTest.php\n- tests/Feature/Jobs/SearchJobsTest.php\n- tests/Feature/Companies/CompanyCrudTest.php\n- tests/Feature/Applications/ApplyToJobTest.php\n- tests/Feature/Me/ProfileTest.php\n\n4. Unit tests structure:\n- tests/Unit/Services/JobServiceTest.php (mock repository)\n- tests/Unit/Services/SearchServiceTest.php (mock ES repository)\n- tests/Unit/Services/ApplicationServiceTest.php\n- tests/Unit/Repositories/ElasticsearchRepositoryTest.php (mock ES client)\n\n5. EXPLAIN assertion helper in tests/Traits/AssertsQueryPlan.php:\n```php\ntrait AssertsQueryPlan\n{\n    protected function assertNotFullTableScan(string $sql, array $bindings = []): void\n    {\n        $explain = DB::select('EXPLAIN ' . $sql, $bindings);\n        foreach ($explain as $row) {\n            $this->assertNotEquals('ALL', $row->type, \n                \"Query performs full table scan: {$sql}\");\n        }\n    }\n}\n```\n\n6. Repository integration tests with EXPLAIN:\n```php\nclass JobRepositoryTest extends TestCase\n{\n    use AssertsQueryPlan;\n\n    public function test_find_by_company_id_uses_index(): void\n    {\n        // Create 1000+ jobs to simulate production\n        Job::factory()->count(1000)->create();\n\n        $this->assertNotFullTableScan(\n            'SELECT id, title FROM jobs WHERE company_id = ? AND status = ?',\n            [1, 'active']\n        );\n    }\n}\n```\n\n7. Key test scenarios:\n- Fuzzy search: 'backand' returns 'backend' jobs\n- Duplicate application returns 409\n- Company can only manage own jobs (403 otherwise)\n- Salary filter excludes out-of-range jobs\n- Pagination meta correct\n\n8. Add coverage to Makefile:\n```makefile\ntest-coverage:\n\tpodman-compose exec app php artisan test --coverage --min=100\n```",
+        "testStrategy": "- Run `make test` and verify all tests pass\n- Run `make test-coverage` and verify 100% line coverage\n- Verify EXPLAIN assertions catch missing indexes (temporarily remove index, test fails)\n- Verify Redis mock prevents actual pub/sub during tests\n- Verify ES integration tests use real ES container\n- Check PHPUnit output shows no skipped or risky tests\n- Run tests in CI pipeline (GitHub Actions if configured)",
+        "priority": "high",
+        "dependencies": [
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "12",
+          "13"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Configure Test Environment and Base TestCase with RefreshDatabase and Redis Mocking",
+            "description": "Set up phpunit.xml for MySQL test database (jobboard_test), configure test environment variables, and create enhanced TestCase.php base class with RefreshDatabase trait, Redis mocking, and authentication helpers.",
+            "dependencies": [],
+            "details": "1. Update phpunit.xml to use MySQL test database instead of SQLite in-memory:\n   - Set DB_CONNECTION=mysql, DB_DATABASE=jobboard_test\n   - Keep QUEUE_CONNECTION=sync, MAIL_MAILER=array\n   - Add ELASTICSEARCH_HOST=elasticsearch:9200\n\n2. Enhance tests/TestCase.php:\n   - Add `use RefreshDatabase` trait\n   - Override setUp() to mock Redis::publish() by default using Mockery\n   - Add helper methods: actingAsCandidate(), actingAsCompany(), actingAsAdmin() that create users with appropriate roles and authenticate via JWT\n   - Add actingAsUser(User $user) for custom user scenarios\n\n3. Add test-coverage Makefile target:\n   - `podman-compose exec app php artisan test --coverage --min=100`\n\n4. Create tests/Traits/AssertsQueryPlan.php with assertNotFullTableScan() method that runs EXPLAIN on queries and fails if type=ALL on any row",
+            "status": "pending",
+            "testStrategy": "Run `make test` to verify test setup works. Verify Redis mock prevents actual pub/sub calls during tests. Run a simple test that uses actingAsCompany() helper.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Complete Auth Feature Tests (Login, Logout, RefreshToken, ForgotPassword, ResetPassword)",
+            "description": "Expand existing auth tests to achieve 100% coverage of all auth actions including edge cases for JWT validation, token expiration, password reset flows, and proper error responses with WWW-Authenticate header.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Expand tests/Feature/Auth/LoginTest.php:\n   - test_login_with_valid_credentials_returns_200_with_token\n   - test_login_with_wrong_password_returns_401_with_www_authenticate_header\n   - test_login_with_nonexistent_email_returns_401\n   - test_login_validates_required_fields_returns_422\n\n2. Complete tests/Feature/Auth/LogoutTest.php:\n   - test_logout_invalidates_token_and_returns_200\n   - test_logout_without_token_returns_401_with_www_authenticate\n   - test_logout_with_invalid_token_returns_401\n\n3. Complete tests/Feature/Auth/RefreshTokenTest.php:\n   - test_refresh_returns_new_token_with_200\n   - test_refresh_with_expired_token_returns_401\n   - test_refresh_without_token_returns_401\n\n4. Create tests/Feature/Auth/ForgotPasswordTest.php:\n   - test_forgot_password_sends_email_for_existing_user\n   - test_forgot_password_returns_200_even_for_nonexistent_email (security)\n   - test_forgot_password_validates_email_format\n\n5. Create tests/Feature/Auth/ResetPasswordTest.php:\n   - test_reset_password_with_valid_token_updates_password\n   - test_reset_password_with_invalid_token_returns_422\n   - test_reset_password_validates_password_confirmation",
+            "status": "pending",
+            "testStrategy": "Run feature tests for auth namespace. Verify 401 responses include WWW-Authenticate header per RFC 6750. Verify password reset email is captured in array mailer.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Create Jobs CRUD Feature Tests and Unit Tests for JobService/JobRepository",
+            "description": "Create comprehensive feature tests for Jobs CRUD endpoints (Create, Update, Delete, Get, List) and unit tests for JobService with mocked repository. Include authorization tests ensuring companies can only manage their own jobs.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create tests/Feature/Jobs/CreateJobTest.php:\n   - test_company_creates_job_returns_201_and_publishes_to_redis\n   - test_candidate_cannot_create_job_returns_403\n   - test_unauthenticated_user_cannot_create_job_returns_401\n   - test_create_job_validates_required_fields\n   - test_create_job_validates_enum_values (employment_type, status)\n\n2. Create tests/Feature/Jobs/UpdateJobTest.php:\n   - test_company_updates_own_job_returns_200\n   - test_company_cannot_update_other_companys_job_returns_403\n   - test_admin_can_update_any_job_returns_200\n   - test_update_job_publishes_to_redis\n\n3. Create tests/Feature/Jobs/DeleteJobTest.php:\n   - test_company_deletes_own_job_returns_204_and_publishes_delete_to_redis\n   - test_company_cannot_delete_other_companys_job_returns_403\n   - test_admin_can_delete_any_job_returns_204\n\n4. Create tests/Feature/Jobs/GetJobTest.php and ListJobsTest.php\n\n5. Create tests/Unit/Services/JobServiceTest.php:\n   - Mock JobRepositoryInterface using Mockery\n   - test_create_calls_repository_create_and_publishes_to_redis\n   - test_update_calls_repository_update_and_publishes_to_redis\n   - test_delete_calls_repository_delete_and_publishes_delete_event\n   - test_get_by_id_throws_not_found_for_missing_job\n\n6. Verify Redis::publish is called with correct channel and payload structure",
+            "status": "pending",
+            "testStrategy": "Run feature and unit tests for jobs namespace. Mock Redis in feature tests to verify publish calls. Assert correct JSON structure in responses including nested company data.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Create Repository Integration Tests with EXPLAIN Assertions for Index Verification",
+            "description": "Create repository integration tests that verify database queries use indexes by running EXPLAIN assertions. Test CompanyRepository and JobRepository queries to ensure no full table scans on tables with significant data volume.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create tests/Integration/Repositories/JobRepositoryTest.php:\n   - Use AssertsQueryPlan trait\n   - Create 1000+ jobs using Job::factory()->count(1000)->create() to simulate production data\n   - test_find_by_company_id_uses_index: Assert EXPLAIN type is not ALL for `SELECT ... FROM jobs WHERE company_id = ?`\n   - test_find_by_status_and_company_uses_composite_index: Assert EXPLAIN type is not ALL for `SELECT ... FROM jobs WHERE company_id = ? AND status = ?`\n   - test_find_by_id_uses_primary_key: Verify type is const or eq_ref\n\n2. Create tests/Integration/Repositories/CompanyRepositoryTest.php:\n   - test_find_by_id_uses_primary_key\n   - test_paginate_with_industry_filter_uses_index\n   - test_find_by_user_id_uses_index\n\n3. Ensure tests use RefreshDatabase and properly seed large datasets\n\n4. Document in tests which indexes are being verified (reference migration file and index name)",
+            "status": "pending",
+            "testStrategy": "Run repository integration tests. Temporarily remove an index and verify the test fails with 'Query performs full table scan' message. Restore index and verify test passes.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Create Unit Tests for SearchService and ElasticsearchRepository with Mocked ES Client",
+            "description": "Create unit tests for SearchService and ElasticsearchRepository by mocking the Elasticsearch client. Test query building logic, fuzzy search, filters, boosting, aggregations, and proper ES document structure.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create tests/Unit/Services/SearchServiceTest.php:\n   - Mock SearchRepositoryInterface\n   - test_search_jobs_builds_bool_query_with_must_and_filter\n   - test_search_with_q_param_creates_multi_match_with_fuzziness_auto\n   - test_search_with_category_filter_adds_term_filter\n   - test_search_with_salary_min_adds_range_filter\n   - test_search_with_is_remote_adds_boolean_filter\n   - test_search_always_filters_by_status_active\n   - test_search_returns_pagination_meta_with_correct_last_page\n   - test_search_includes_aggregations_by_category\n   - test_boosting_applies_title_3x_company_2x_description_1x\n\n2. Create tests/Unit/Repositories/ElasticsearchRepositoryTest.php:\n   - Mock Elastic\\Elasticsearch\\Client\n   - test_search_calls_client_with_correct_index_and_body\n   - test_search_returns_hits_total_and_aggregations\n   - test_index_calls_client_index_with_document\n   - test_delete_calls_client_delete_with_id\n   - test_search_uses_configured_index_name_from_config\n\n3. Verify that SearchService correctly transforms repository results into the expected API response format",
+            "status": "pending",
+            "testStrategy": "Run unit tests for search namespace. Verify mocked ES client receives correct query structure including fuzziness, boosting, and bool query composition. Test edge cases like empty search results.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-05-22T05:39:56.866Z"
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "lastModified": "2026-05-22T11:08:06.992Z",
+      "taskCount": 15,
+      "completedCount": 15,
+      "tags": [
+        "master"
+      ]
+    }
+  }
+}

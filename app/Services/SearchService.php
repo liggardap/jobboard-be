@@ -76,7 +76,9 @@ class SearchService implements SearchServiceInterface
             ],
             'sort' => [['_score' => 'desc'], ['published_at' => 'desc']],
             'aggs' => [
-                'by_category' => ['terms' => ['field' => 'category']],
+                'by_category'        => ['terms' => ['field' => 'category']],
+                'by_employment_type' => ['terms' => ['field' => 'employment_type']],
+                'by_is_remote'       => ['terms' => ['field' => 'is_remote']],
             ],
         ];
     }

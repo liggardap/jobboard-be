@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Interfaces\ElasticsearchIndexManagerInterface;
 use App\Interfaces\JobRepositoryInterface;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 
 class ReindexElasticsearch extends Command
@@ -28,6 +29,8 @@ class ReindexElasticsearch extends Command
             $this->deleteVersionedIndexes($alias);
         }
 
+        $startedAt = Carbon::now();
+
         $this->info("Creating index: {$newIndex}");
         $this->indexManager->createIndex($newIndex, $this->mapping());
 
@@ -38,12 +41,37 @@ class ReindexElasticsearch extends Command
         $this->info('Switching alias...');
         $this->switchAlias($alias, $newIndex);
 
+        $this->info('Running delta sync for jobs created/updated during reindex...');
+        $delta = $this->indexJobsUpdatedSince($startedAt, $newIndex);
+        $this->info("Delta sync: {$delta} jobs resynced.");
+
         $this->info('Cleaning up old indexes...');
         $this->cleanupOldIndexes($alias, $newIndex);
 
         $this->info('Reindex complete.');
 
         return Command::SUCCESS;
+    }
+
+    private function indexJobsUpdatedSince(Carbon $since, string $indexName): int
+    {
+        $indexed = 0;
+
+        $this->jobRepository->chunkUpdatedSince($since, 100, function ($jobs) use ($indexName, &$indexed): void {
+            $operations = [];
+
+            foreach ($jobs as $job) {
+                $operations[] = ['index' => ['_index' => $indexName, '_id' => (string) $job->id]];
+                $operations[] = $job->toSearchArray();
+            }
+
+            if (! empty($operations)) {
+                $this->indexManager->bulk($operations);
+                $indexed += count($jobs);
+            }
+        });
+
+        return $indexed;
     }
 
     private function indexAllJobs(string $indexName): int

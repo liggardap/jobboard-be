@@ -3,6 +3,7 @@
 namespace App\Interfaces;
 
 use App\Models\Job;
+use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 interface JobRepositoryInterface
@@ -18,4 +19,6 @@ interface JobRepositoryInterface
     public function delete(Job $job): void;
 
     public function chunkActive(int $size, callable $callback): void;
+
+    public function chunkUpdatedSince(Carbon $since, int $size, callable $callback): void;
 }
